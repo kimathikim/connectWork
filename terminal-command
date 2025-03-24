@@ -1,0 +1,3 @@
+vercel env add VITE_SUPABASE_ANON_KEY
+vercel env add VITE_SUPABASE_URL
+vercel env add VITE_SUPABASE_SERVICE_ROLE_KEY
