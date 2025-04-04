@@ -161,7 +161,7 @@ function BookingPage() {
         console.error("Worker fetch error:", workerError)
         throw workerError
       }
-      
+
       if (!workerData) {
         console.error("No worker data returned")
         throw new Error("Worker not found")
@@ -228,10 +228,10 @@ function BookingPage() {
   const handleServiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedServiceId = e.target.value
     const selectedWorkerService = workerServices.find(ws => ws.service_id === selectedServiceId)
-    
+
     if (selectedWorkerService) {
       setService(selectedWorkerService.service)
-      
+
       // Update form data with the selected service's rate
       setFormData(prev => ({
         ...prev,
@@ -275,7 +275,7 @@ function BookingPage() {
       // Find the worker's rate for this service
       const serviceId = service.id
       const workerService = workerServices.find((ws: any) => ws.service_id === serviceId)
-      
+
       if (!workerService) {
         console.error("Could not find worker service for ID:", serviceId)
         setError("Could not find rate information for this service")
@@ -362,14 +362,14 @@ function BookingPage() {
               <div className="mb-8 p-4 bg-gray-50 rounded-lg">
                 {service && (
                   <div className="flex items-start gap-4 mb-4">
-                    <DollarSign className="h-6 w-6 text-[#CC7357]" />
+                    <span className="h-6 w-6 text-[#CC7357] font-bold">KES</span>
                     <div>
                       <h3 className="font-medium text-gray-900">{service.name}</h3>
-                      <p className="text-gray-600">${service.base_price}/hour</p>
+                      <p className="text-gray-600">KES {service.base_price}/hour</p>
                     </div>
                   </div>
                 )}
-                
+
                 {worker && (
                   <div className="flex items-start gap-4">
                     <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">

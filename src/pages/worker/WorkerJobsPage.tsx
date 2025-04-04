@@ -207,11 +207,11 @@ function WorkerJobsPage() {
                         </div>
 
                         <div className="flex items-center text-gray-500 text-sm">
-                          <DollarSign className="h-4 w-4 mr-1" />
+                          <span className="text-xs font-bold mr-1">KES</span>
                           <span>
                             {application.job.budget_min === application.job.budget_max
-                              ? `$${application.job.budget_min}`
-                              : `$${application.job.budget_min} - $${application.job.budget_max}`}
+                              ? `${application.job.budget_min}`
+                              : `${application.job.budget_min} - ${application.job.budget_max}`}
                           </span>
                         </div>
 

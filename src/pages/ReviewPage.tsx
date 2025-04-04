@@ -146,6 +146,7 @@ function ReviewPage() {
         rating,
         comment,
         created_at: new Date().toISOString(),
+        status: "pending",
       }
 
       // Try to add helpful counts if columns exist

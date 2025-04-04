@@ -3,12 +3,13 @@ import { Search } from "lucide-react";
 import { Button } from "./ui/button";
 
 interface SearchButtonProps {
-  onClick: () => void;
+  onClick: (e?: React.FormEvent) => void;
   variant?: "default" | "outline" | "ghost" | "link";
   size?: "default" | "sm" | "lg";
   className?: string;
   label?: string;
   showIcon?: boolean;
+  disabled?: boolean;
 }
 
 export const SearchButton = ({
@@ -17,7 +18,8 @@ export const SearchButton = ({
   size = "default",
   className = "",
   label = "Search",
-  showIcon = true
+  showIcon = true,
+  disabled = false
 }: SearchButtonProps) => {
   return (
     <Button
@@ -26,6 +28,7 @@ export const SearchButton = ({
       className={className}
       onClick={onClick}
       type="submit"
+      disabled={disabled}
     >
       {showIcon && <Search className="h-5 w-5 mr-2" />}
       {label}

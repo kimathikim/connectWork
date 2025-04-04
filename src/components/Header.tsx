@@ -75,19 +75,27 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
-            <Link to="/" className="flex-shrink-0 flex items-center">
-              <span className="text-2xl font-bold text-[#CC7357]">WorkerConnect</span>
+            <Link
+              to={user ? (userType === "worker" ? "/worker/dashboard" : "/dashboard") : "/"}
+              className="flex-shrink-0 flex items-center"
+            >
+              <span className="text-2xl font-bold text-[#CC7357]">
+                {user && userType === "worker" ? "WorkerConnect Pro" : "WorkerConnect"}
+              </span>
             </Link>
           </div>
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-8">
-            <Link
-              to="/"
-              className={`text-gray-700 hover:text-[#CC7357] ${location.pathname === "/" ? "text-[#CC7357]" : ""}`}
-            >
-              Home
-            </Link>
+            {/* Only show Home link for non-logged in users */}
+            {!user && (
+              <Link
+                to="/"
+                className={`text-gray-700 hover:text-[#CC7357] ${location.pathname === "/" ? "text-[#CC7357]" : ""}`}
+              >
+                Home
+              </Link>
+            )}
             <Link
               to="/search"
               className={`text-gray-700 hover:text-[#CC7357] ${location.pathname === "/search" ? "text-[#CC7357]" : ""}`}
@@ -189,13 +197,16 @@ export function Header() {
       {isMenuOpen && (
         <div className="md:hidden">
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
-            <Link
-              to="/"
-              className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Home
-            </Link>
+            {/* Only show Home link for non-logged in users */}
+            {!user && (
+              <Link
+                to="/"
+                className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Home
+              </Link>
+            )}
             <Link
               to="/search"
               className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"

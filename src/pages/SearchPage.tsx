@@ -1,20 +1,22 @@
-
 "use client"
 
 import React from "react"
-
 import { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
-import { SearchIcon, MapPin, Filter, Star, ChevronDown, X, DollarSign, Clock } from "lucide-react"
+import { Search as SearchIcon, MapPin, Filter, Star, ChevronDown, X, DollarSign, Clock } from "lucide-react"
 import { supabase } from "../lib/supabase"
 import { SearchButton } from "../components/SearchButton"
+import { useToast } from "../components/ui/toast"
 
 function SearchPage() {
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<any[]>([])
   const [filteredWorkers, setFilteredWorkers] = useState<any[]>([])
   const [services, setServices] = useState<any[]>([])
   const [showFilters, setShowFilters] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
+  const { addToast } = useToast()
 
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState("")
@@ -23,7 +25,7 @@ function SearchPage() {
   const [minRate, setMinRate] = useState<number | undefined>(undefined)
   const [maxRate, setMaxRate] = useState<number | undefined>(undefined)
   const [minRating, setMinRating] = useState<number | undefined>(undefined)
-  const [sortBy, setSortBy] = useState<"hourly_rate" | "experience" | "rating">("hourly_rate")
+  const [sortBy, setSortBy] = useState<"hourly_rate" | "years_experience" | "avg_rating">("avg_rating")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
 
   useEffect(() => {
@@ -44,12 +46,15 @@ function SearchPage() {
       setServices(data || [])
     } catch (error) {
       console.error("Error loading services:", error)
+      setError("Failed to load services. Please try again later.")
+      addToast("Failed to load services", "error")
     }
   }
 
   const loadWorkers = async () => {
     try {
       setLoading(true)
+      setError(null)
 
       const { data, error } = await supabase
         .from("worker_profiles")
@@ -61,14 +66,22 @@ function SearchPage() {
             service:services(*)
           )
         `)
-        .order("hourly_rate", { ascending: false })
+        .order("avg_rating", { ascending: false })
 
       if (error) throw error
-      console.log(data)
+
       setWorkers(data || [])
       setFilteredWorkers(data || [])
-    } catch (error) {
+
+      if (data && data.length > 0) {
+        addToast(`Loaded ${data.length} workers successfully`, "success")
+      }
+    } catch (error: any) {
       console.error("Error loading workers:", error)
+      setError(error.message || "Failed to load workers. Please try again later.")
+      addToast("Failed to load workers", "error")
+      setWorkers([])
+      setFilteredWorkers([])
     } finally {
       setLoading(false)
     }
@@ -82,7 +95,8 @@ function SearchPage() {
       const query = searchQuery.toLowerCase()
       filtered = filtered.filter(
         (worker) =>
-          worker.profile.full_name.toLowerCase().includes(query) || worker.profession.toLowerCase().includes(query),
+          (worker.profile?.full_name?.toLowerCase().includes(query) || false) ||
+          (worker.profession?.toLowerCase().includes(query) || false)
       )
     }
 
@@ -90,13 +104,15 @@ function SearchPage() {
     if (location) {
       const locationQuery = location.toLowerCase()
       filtered = filtered.filter(
-        (worker) => worker.profile.location && worker.profile.location.toLowerCase().includes(locationQuery),
+        (worker) => worker.profile?.location && worker.profile.location.toLowerCase().includes(locationQuery)
       )
     }
 
     // Filter by services
     if (selectedServices.length > 0) {
-      filtered = filtered.filter((worker) => worker.services.some((s: any) => selectedServices.includes(s.service.id)))
+      filtered = filtered.filter((worker) =>
+        worker.services && worker.services.some((s: any) => selectedServices.includes(s.service.id))
+      )
     }
 
     // Filter by hourly rate
@@ -108,19 +124,19 @@ function SearchPage() {
       filtered = filtered.filter((worker) => worker.hourly_rate <= maxRate)
     }
 
-    // Filter by rating - check if rating exists before filtering
+    // Filter by rating - check if avg_rating exists before filtering
     if (minRating !== undefined) {
-      filtered = filtered.filter((worker) => 
-        worker.rating !== undefined ? worker.rating >= minRating : true
+      filtered = filtered.filter((worker) =>
+        worker.avg_rating !== undefined ? worker.avg_rating >= minRating : true
       )
     }
 
     // Sort results - handle missing columns
     filtered.sort((a, b) => {
       // If the sort column doesn't exist, default to hourly_rate
-      const aValue = a[sortBy] !== undefined ? a[sortBy] : a.hourly_rate;
-      const bValue = b[sortBy] !== undefined ? b[sortBy] : b.hourly_rate;
-      
+      const aValue = a[sortBy] !== undefined ? a[sortBy] : a.hourly_rate || 0;
+      const bValue = b[sortBy] !== undefined ? b[sortBy] : b.hourly_rate || 0;
+
       if (sortOrder === "asc") {
         return aValue - bValue
       } else {
@@ -131,14 +147,20 @@ function SearchPage() {
     setFilteredWorkers(filtered)
   }
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    filterWorkers()
+  const handleSearch = (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    setIsSearching(true)
+
+    // Add a small delay to show the searching state
+    setTimeout(() => {
+      filterWorkers()
+      setIsSearching(false)
+    }, 300)
   }
 
   const toggleServiceFilter = (serviceId: string) => {
     setSelectedServices((prev) =>
-      prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId],
+      prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId]
     )
   }
 
@@ -149,12 +171,14 @@ function SearchPage() {
     setMinRate(undefined)
     setMaxRate(undefined)
     setMinRating(undefined)
-    setSortBy("rating")
+    setSortBy("avg_rating")
     setSortOrder("desc")
   }
 
   const getWorkerServices = (worker: any) => {
-    return worker.services.map((s: any) => s.service.name).join(", ")
+    return worker.services && worker.services.length > 0
+      ? worker.services.map((s: any) => s.service.name).join(", ")
+      : "No services listed"
   }
 
   return (
@@ -196,8 +220,10 @@ function SearchPage() {
               </div>
 
               <SearchButton
-                onClick={() => handleSearch}
+                onClick={handleSearch}
                 className="bg-[#CC7357] text-white px-6 py-3 rounded-md hover:bg-[#B66347] transition-colors"
+                label={isSearching ? "Searching..." : "Search"}
+                disabled={isSearching}
               />
 
               <button
@@ -246,14 +272,14 @@ function SearchPage() {
 
                   {/* Hourly Rate Range */}
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Hourly Rate Range ($)</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Hourly Rate Range (KES)</h3>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label htmlFor="minRate" className="sr-only">
                           Minimum Rate
                         </label>
                         <div className="relative">
-                          <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs font-bold">KES</span>
                           <input
                             id="minRate"
                             type="number"
@@ -270,7 +296,7 @@ function SearchPage() {
                           Maximum Rate
                         </label>
                         <div className="relative">
-                          <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 text-xs font-bold">KES</span>
                           <input
                             id="maxRate"
                             type="number"
@@ -307,7 +333,7 @@ function SearchPage() {
                         value={`${sortBy}-${sortOrder}`}
                         onChange={(e) => {
                           const [newSortBy, newSortOrder] = e.target.value.split("-") as [
-                            "rating" | "hourly_rate" | "experience",
+                            "avg_rating" | "hourly_rate" | "years_experience",
                             "asc" | "desc",
                           ]
                           setSortBy(newSortBy)
@@ -315,8 +341,8 @@ function SearchPage() {
                         }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-[#CC7357] focus:border-[#CC7357]"
                       >
-                        <option value="rating-desc">Highest Rated</option>
-                        <option value="rating-asc">Lowest Rated</option>
+                        <option value="avg_rating-desc">Highest Rated</option>
+                        <option value="avg_rating-asc">Lowest Rated</option>
                         <option value="hourly_rate-asc">Lowest Hourly Rate</option>
                         <option value="hourly_rate-desc">Highest Hourly Rate</option>
                         <option value="years_experience-desc">Most Experienced</option>
@@ -339,9 +365,30 @@ function SearchPage() {
             </div>
           </div>
 
-          {loading ? (
+          {error ? (
+            <div className="p-12 text-center">
+              <div className="bg-red-50 p-4 rounded-md mb-6 inline-block">
+                <p className="text-red-600">{error}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setError(null)
+                  loadWorkers()
+                }}
+                className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : loading ? (
             <div className="p-12 flex items-center justify-center">
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#CC7357]"></div>
+              <span className="ml-3 text-gray-600">Loading workers...</span>
+            </div>
+          ) : isSearching ? (
+            <div className="p-12 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#CC7357]"></div>
+              <span className="ml-3 text-gray-600">Searching...</span>
             </div>
           ) : filteredWorkers.length === 0 ? (
             <div className="p-12 text-center">
@@ -361,7 +408,7 @@ function SearchPage() {
                 <div key={worker.id} className="p-6 hover:bg-gray-50">
                   <div className="flex flex-col md:flex-row md:items-start gap-6">
                     <div className="w-24 h-24 rounded-full overflow-hidden bg-gray-200 flex-shrink-0 mx-auto md:mx-0">
-                      {worker.profile.avatar_url ? (
+                      {worker.profile?.avatar_url ? (
                         <img
                           src={worker.profile.avatar_url || "/placeholder.svg"}
                           alt={worker.profile.full_name}
@@ -369,25 +416,25 @@ function SearchPage() {
                         />
                       ) : (
                         <div className="h-full w-full flex items-center justify-center text-gray-400 text-4xl font-medium">
-                          {worker.profile.full_name.charAt(0)}
+                          {worker.profile?.full_name?.charAt(0) || "?"}
                         </div>
                       )}
                     </div>
 
                     <div className="flex-1 text-center md:text-left">
-                      <h3 className="text-xl font-bold text-gray-900">{worker.profile.full_name}</h3>
-                      <p className="text-[#6B8E23] font-medium">{worker.profession}</p>
+                      <h3 className="text-xl font-bold text-gray-900">{worker.profile?.full_name || "Unnamed Worker"}</h3>
+                      <p className="text-[#6B8E23] font-medium">{worker.profession || "Professional"}</p>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 justify-center md:justify-start">
                         <div className="flex items-center">
                           <Star className="h-5 w-5 text-yellow-400 fill-current" />
                           <span className="ml-1 text-gray-700">
-                            {worker.rating ? worker.rating.toFixed(1) : "New"}
-                            {worker.review_count > 0 && ` (${worker.review_count} reviews)`}
+                            {worker.avg_rating ? worker.avg_rating.toFixed(1) : "New"}
+                            {worker.total_jobs > 0 && ` (${worker.total_jobs} jobs)`}
                           </span>
                         </div>
 
-                        {worker.profile.location && (
+                        {worker.profile?.location && (
                           <div className="flex items-center text-gray-500">
                             <MapPin className="h-4 w-4 mr-1" />
                             <span>{worker.profile.location}</span>
@@ -396,16 +443,18 @@ function SearchPage() {
 
                         <div className="flex items-center text-gray-500">
                           <DollarSign className="h-4 w-4 mr-1" />
-                          <span>${worker.hourly_rate}/hr</span>
+                          <span>KES {worker.hourly_rate || 0}/hr</span>
                         </div>
 
-                        <div className="flex items-center text-gray-500">
-                          <Clock className="h-4 w-4 mr-1" />
-                          <span>{worker.years_experience} years exp.</span>
-                        </div>
+                        {worker.years_experience !== undefined && (
+                          <div className="flex items-center text-gray-500">
+                            <Clock className="h-4 w-4 mr-1" />
+                            <span>{worker.years_experience} years exp.</span>
+                          </div>
+                        )}
                       </div>
 
-                      {worker.services.length > 0 && (
+                      {worker.services && worker.services.length > 0 && (
                         <div className="mt-3">
                           <p className="text-sm text-gray-500">
                             <span className="font-medium">Services:</span> {getWorkerServices(worker)}
@@ -413,11 +462,11 @@ function SearchPage() {
                         </div>
                       )}
 
-                      {worker.profile.bio && <p className="mt-3 text-gray-700 line-clamp-2">{worker.profile.bio}</p>}
+                      {worker.profile?.bio && <p className="mt-3 text-gray-700 line-clamp-2">{worker.profile.bio}</p>}
 
                       <div className="mt-4 flex flex-wrap gap-2 justify-center md:justify-start">
                         <Link
-                          to={`/worker-profile/${worker.id}`}
+                          to={`/workers/${worker.id}`}
                           className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347] transition-colors"
                         >
                           View Profile
@@ -450,4 +499,3 @@ function SearchPage() {
 }
 
 export default SearchPage
-

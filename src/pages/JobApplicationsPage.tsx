@@ -143,9 +143,9 @@ function JobApplicationsPage() {
       // Update the job status to in_progress and assign the worker
       const { error: jobUpdateError } = await supabase
         .from("jobs")
-        .update({ 
+        .update({
           status: "in_progress",
-          assigned_worker_id: application.worker_id 
+          assigned_worker_id: application.worker_id
         })
         .eq("id", jobId)
 
@@ -170,7 +170,7 @@ function JobApplicationsPage() {
 
       // Reload the job and applications
       await loadJobAndApplications()
-      
+
       // Show success message
       alert("Application accepted successfully! The job has been assigned to the worker.")
     } catch (err) {
@@ -199,7 +199,7 @@ function JobApplicationsPage() {
 
       // Reload the job and applications
       await loadJobAndApplications()
-      
+
       // Show success message
       alert("Application rejected successfully.")
     } catch (err) {
@@ -258,9 +258,9 @@ function JobApplicationsPage() {
               </div>
 
               <div className="flex items-center text-gray-500 text-sm">
-                <DollarSign className="h-4 w-4 mr-1" />
+                <span className="text-xs font-bold mr-1">KES</span>
                 <span>
-                  {job.budget_min === job.budget_max ? `$${job.budget_min}` : `$${job.budget_min} - $${job.budget_max}`}
+                  {job.budget_min === job.budget_max ? `${job.budget_min}` : `${job.budget_min} - ${job.budget_max}`}
                 </span>
               </div>
 
@@ -371,8 +371,8 @@ function JobApplicationsPage() {
                         )}
 
                         <div className="flex items-center text-gray-500">
-                          <DollarSign className="h-4 w-4 mr-1" />
-                          <span>Proposed: ${application.proposed_rate}/hr</span>
+                          <span className="text-xs font-bold mr-1">KES</span>
+                          <span>Proposed: {application.proposed_rate}/hr</span>
                         </div>
 
                         <div className="flex items-center text-gray-500">

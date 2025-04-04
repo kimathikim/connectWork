@@ -1,40 +1,51 @@
-"use client"
-
-import React from "react"
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { Briefcase, MapPin, DollarSign, Clock, Filter, Search, ChevronDown, X, User } from "lucide-react"
-import { getCurrentUser, getAvailableJobs, getServices } from "../../lib/supabase"
+import { Briefcase, MapPin, DollarSign, Clock, User } from "lucide-react"
+import { getCurrentUser, getAvailableJobs } from "../../lib/supabase"
+import { ensureJobsRequiredSkills } from "../../lib/job-utils.js"
+import { useToast } from "../../components/ui/toast"
+import AdvancedJobSearch from "../../components/AdvancedJobSearch"
 
 function FindJobsPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { addToast } = useToast()
 
   const [loading, setLoading] = useState(true)
   const [jobs, setJobs] = useState<any[]>([])
-  const [services, setServices] = useState<any[]>([])
-  const [showFilters, setShowFilters] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
 
-  // Filter states
-  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "")
-  const [location, setLocation] = useState(searchParams.get("location") || "")
-  const [selectedServices, setSelectedServices] = useState<string[]>([])
-  const [minBudget, setMinBudget] = useState<number | undefined>(
-    searchParams.get("minBudget") ? Number(searchParams.get("minBudget")) : undefined,
-  )
-  const [maxBudget, setMaxBudget] = useState<number | undefined>(
-    searchParams.get("maxBudget") ? Number(searchParams.get("maxBudget")) : undefined,
-  )
-  const [urgencyLevels, setUrgencyLevels] = useState<string[]>([])
+  // Advanced search filters
+  const [filters, setFilters] = useState({
+    query: searchParams.get("q") || "",
+    location: searchParams.get("location") || "",
+    serviceIds: [] as string[],
+    minBudget: searchParams.get("minBudget") ? Number(searchParams.get("minBudget")) : undefined as number | undefined,
+    maxBudget: searchParams.get("maxBudget") ? Number(searchParams.get("maxBudget")) : undefined as number | undefined,
+    urgency: [] as string[],
+    datePosted: "any",
+    requiredSkills: [] as string[],
+    maxDistance: 50,
+    sortBy: "date",
+    sortOrder: "desc" as "asc" | "desc"
+  })
 
   useEffect(() => {
     checkAuth()
-    loadServices()
+    loadJobs()
   }, [])
 
   useEffect(() => {
-    loadJobs()
-  }, [searchQuery, location, selectedServices, minBudget, maxBudget, urgencyLevels])
+    // Update URL search params when filters change
+    const newSearchParams = new URLSearchParams()
+
+    if (filters.query) newSearchParams.set("q", filters.query)
+    if (filters.location) newSearchParams.set("location", filters.location)
+    if (filters.minBudget !== undefined) newSearchParams.set("minBudget", filters.minBudget.toString())
+    if (filters.maxBudget !== undefined) newSearchParams.set("maxBudget", filters.maxBudget.toString())
+
+    setSearchParams(newSearchParams)
+  }, [filters, setSearchParams])
 
   const checkAuth = async () => {
     try {
@@ -46,93 +57,44 @@ function FindJobsPage() {
       }
     } catch (error) {
       console.error("Error checking auth:", error)
-    }
-  }
-
-  const loadServices = async () => {
-    try {
-      const servicesData = await getServices()
-      setServices(servicesData || [])
-    } catch (error) {
-      console.error("Error loading services:", error)
+      addToast("Authentication error. Please log in again.", "error")
     }
   }
 
   const loadJobs = async () => {
     try {
       setLoading(true)
+      setIsSearching(true)
 
-      const filters: any = {}
-
-      if (selectedServices.length > 0) {
-        filters.serviceIds = selectedServices
-      }
-
-      if (location) {
-        filters.location = location
-      }
-
-      if (minBudget !== undefined) {
-        filters.minBudget = minBudget
-      }
-
-      if (maxBudget !== undefined) {
-        filters.maxBudget = maxBudget
-      }
-
-      if (urgencyLevels.length > 0) {
-        filters.urgency = urgencyLevels
-      }
-
+      // Use the filters state for job search
       const jobsData = await getAvailableJobs(filters)
 
-      // Filter by search query if provided
-      let filteredJobs = jobsData
-      if (searchQuery) {
-        filteredJobs = jobsData.filter(
-          (job: any) =>
-            job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            job.description.toLowerCase().includes(searchQuery.toLowerCase()),
-        )
-      }
+      // Ensure all jobs have the required_skills field
+      const jobsWithSkills = ensureJobsRequiredSkills(jobsData || [])
 
-      setJobs(filteredJobs || [])
-    } catch (error) {
+      setJobs(jobsWithSkills)
+
+      // Show toast notification
+      if (jobsData.length === 0) {
+        addToast("No jobs found matching your criteria", "info")
+      } else {
+        addToast(`Found ${jobsData.length} jobs matching your criteria`, "success")
+      }
+    } catch (error: any) {
       console.error("Error loading jobs:", error)
+      addToast(error.message || "Failed to load jobs", "error")
     } finally {
       setLoading(false)
+      setIsSearching(false)
     }
   }
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSearch = (searchFilters: any) => {
+    // Update filters state with new search parameters
+    setFilters(searchFilters)
 
-    // Update URL params
-    const params = new URLSearchParams()
-    if (searchQuery) params.set("q", searchQuery)
-    if (location) params.set("location", location)
-    if (minBudget !== undefined) params.set("minBudget", minBudget.toString())
-    if (maxBudget !== undefined) params.set("maxBudget", maxBudget.toString())
-
-    setSearchParams(params)
+    // Load jobs with new filters
     loadJobs()
-  }
-
-  const toggleServiceFilter = (serviceId: string) => {
-    setSelectedServices((prev) =>
-      prev.includes(serviceId) ? prev.filter((id) => id !== serviceId) : [...prev, serviceId],
-    )
-  }
-
-  const toggleUrgencyFilter = (urgency: string) => {
-    setUrgencyLevels((prev) => (prev.includes(urgency) ? prev.filter((u) => u !== urgency) : [...prev, urgency]))
-  }
-
-  const clearFilters = () => {
-    setSelectedServices([])
-    setMinBudget(undefined)
-    setMaxBudget(undefined)
-    setUrgencyLevels([])
   }
 
   const formatDate = (dateString: string) => {
@@ -144,272 +106,182 @@ function FindJobsPage() {
     })
   }
 
-  // Map urgency level to a more user-friendly display
-  const getUrgencyDisplay = (urgency: string) => {
-    const urgencyMap: Record<string, { label: string; color: string }> = {
-      low: { label: "Low Priority", color: "bg-blue-100 text-blue-800" },
-      normal: { label: "Normal Priority", color: "bg-green-100 text-green-800" },
-      high: { label: "High Priority", color: "bg-orange-100 text-orange-800" },
-      emergency: { label: "Emergency", color: "bg-red-100 text-red-800" },
+  const getUrgencyColor = (urgency: string) => {
+    switch (urgency) {
+      case "low":
+        return "bg-blue-100 text-blue-800"
+      case "normal":
+        return "bg-green-100 text-green-800"
+      case "high":
+        return "bg-yellow-100 text-yellow-800"
+      case "emergency":
+        return "bg-red-100 text-red-800"
+      default:
+        return "bg-gray-100 text-gray-800"
     }
-
-    return urgencyMap[urgency] || { label: "Normal Priority", color: "bg-green-100 text-green-800" }
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC] py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
+    <div className="min-h-screen bg-[#F5F5DC]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-gray-900">Find Jobs</h1>
-          <p className="text-gray-600 mt-2">Browse available jobs that match your skills</p>
         </div>
 
-        {/* Search and Filters */}
-        <div className="bg-white rounded-lg shadow-md overflow-hidden mb-8">
-          <div className="p-6">
-            <form onSubmit={handleSearch} className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                  <input
-                    type="text"
-                    placeholder="Search jobs by title or description"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#CC7357] focus:border-[#CC7357]"
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1">
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
-                  <input
-                    type="text"
-                    placeholder="Location"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="w-full pl-10 pr-3 py-3 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-[#CC7357] focus:border-[#CC7357]"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="bg-[#CC7357] text-white px-6 py-3 rounded-md hover:bg-[#B66347] transition-colors"
-              >
-                Search
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowFilters(!showFilters)}
-                className="flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 rounded-md hover:bg-gray-50"
-              >
-                <Filter className="h-5 w-5" />
-                <span>Filters</span>
-                <ChevronDown className={`h-4 w-4 transition-transform ${showFilters ? "rotate-180" : ""}`} />
-              </button>
-            </form>
-
-            {/* Advanced Filters */}
-            {showFilters && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-medium text-gray-900">Advanced Filters</h2>
-                  <button
-                    onClick={clearFilters}
-                    className="text-sm text-[#CC7357] hover:underline flex items-center gap-1"
-                  >
-                    <X className="h-4 w-4" />
-                    Clear filters
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Service Type */}
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Service Type</h3>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {services.map((service) => (
-                        <label key={service.id} className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={selectedServices.includes(service.id)}
-                            onChange={() => toggleServiceFilter(service.id)}
-                            className="rounded border-gray-300 text-[#CC7357] focus:ring-[#CC7357]"
-                          />
-                          <span className="ml-2 text-gray-700">{service.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Budget Range */}
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Budget Range</h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label htmlFor="minBudget" className="sr-only">
-                          Minimum Budget
-                        </label>
-                        <div className="relative">
-                          <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                          <input
-                            id="minBudget"
-                            type="number"
-                            placeholder="Min"
-                            min="0"
-                            value={minBudget === undefined ? "" : minBudget}
-                            onChange={(e) => setMinBudget(e.target.value ? Number(e.target.value) : undefined)}
-                            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-[#CC7357] focus:border-[#CC7357]"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label htmlFor="maxBudget" className="sr-only">
-                          Maximum Budget
-                        </label>
-                        <div className="relative">
-                          <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                          <input
-                            id="maxBudget"
-                            type="number"
-                            placeholder="Max"
-                            min="0"
-                            value={maxBudget === undefined ? "" : maxBudget}
-                            onChange={(e) => setMaxBudget(e.target.value ? Number(e.target.value) : undefined)}
-                            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-[#CC7357] focus:border-[#CC7357]"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Urgency Level */}
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Urgency Level</h3>
-                    <div className="space-y-2">
-                      {["low", "normal", "high", "emergency"].map((urgency) => (
-                        <label key={urgency} className="flex items-center">
-                          <input
-                            type="checkbox"
-                            checked={urgencyLevels.includes(urgency)}
-                            onChange={() => toggleUrgencyFilter(urgency)}
-                            className="rounded border-gray-300 text-[#CC7357] focus:ring-[#CC7357]"
-                          />
-                          <span className="ml-2 text-gray-700">
-                            {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        {/* Advanced Job Search Component */}
+        <AdvancedJobSearch
+          onSearch={handleSearch}
+          initialFilters={filters}
+        />
 
         {/* Jobs List */}
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-bold text-gray-900">Available Jobs</h2>
-              <span className="text-gray-500">{jobs.length} jobs found</span>
-            </div>
+          <div className="p-4 border-b border-gray-200">
+            <h2 className="text-xl font-semibold text-gray-900">
+              {isSearching ? "Searching..." : `${jobs.length} Jobs Found`}
+            </h2>
           </div>
 
           {loading ? (
-            <div className="p-12 flex items-center justify-center">
+            <div className="p-12 flex justify-center items-center">
               <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#CC7357]"></div>
+              <span className="ml-3 text-gray-600">Loading jobs...</span>
             </div>
           ) : jobs.length === 0 ? (
             <div className="p-12 text-center">
               <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No jobs found</h3>
-              <p className="text-gray-500 mb-6">
-                Try adjusting your search filters or check back later for new opportunities.
-              </p>
+              <p className="text-gray-500 mb-6">Try adjusting your search filters or try a different search term.</p>
               <button
-                onClick={clearFilters}
-                className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors"
+                onClick={() => handleSearch({})}
+                className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347] transition-colors"
               >
                 Clear Filters
               </button>
             </div>
           ) : (
             <div className="divide-y divide-gray-200">
-              {jobs.map((job) => {
-                const urgencyDisplay = getUrgencyDisplay(job.urgency_level)
-
-                return (
-                  <div key={job.id} className="p-6 hover:bg-gray-50">
-                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                      <div className="flex-1">
-                        <Link to={`/jobs/${job.id}`} className="block">
-                          <h3 className="text-lg font-bold text-gray-900 hover:text-[#CC7357]">{job.title}</h3>
-                        </Link>
-
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
-                          <div className="flex items-center text-gray-500 text-sm">
-                            <MapPin className="h-4 w-4 mr-1" />
-                            <span>{job.location}</span>
-                          </div>
-
-                          <div className="flex items-center text-gray-500 text-sm">
-                            <DollarSign className="h-4 w-4 mr-1" />
-                            <span>
-                              {job.budget_min === job.budget_max
-                                ? `$${job.budget_min}`
-                                : `$${job.budget_min} - $${job.budget_max}`}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center text-gray-500 text-sm">
-                            <Clock className="h-4 w-4 mr-1" />
-                            <span>{formatDate(job.created_at)}</span>
-                          </div>
-
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${urgencyDisplay.color}`}>
-                            {urgencyDisplay.label}
-                          </span>
+              {jobs.map((job) => (
+                <div key={job.id} className="p-6 hover:bg-gray-50">
+                  <div className="flex flex-col md:flex-row md:items-center">
+                    <div className="flex-1">
+                      <div className="flex items-start">
+                        <div className="h-12 w-12 rounded-full overflow-hidden bg-gray-200 flex-shrink-0">
+                          {job.customer?.avatar_url ? (
+                            <img
+                              src={job.customer.avatar_url}
+                              alt={job.customer.full_name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <User className="h-full w-full p-2 text-gray-400" />
+                          )}
                         </div>
+                        <div className="ml-4">
+                          <h3 className="text-lg font-medium text-gray-900">
+                            <Link to={`/jobs/${job.id}`} className="hover:text-[#CC7357]">
+                              {job.title}
+                            </Link>
+                          </h3>
+                          <p className="text-sm text-gray-500">{job.customer?.full_name || "Unknown Customer"}</p>
 
-                        <p className="text-gray-600 mt-3 line-clamp-2">{job.description}</p>
+                          {/* Location */}
+                          {job.location && (
+                            <div className="flex items-center mt-1 text-sm text-gray-500">
+                              <MapPin className="h-4 w-4 mr-1 text-gray-400" />
+                              <span>
+                                {job.location}
+                                {job.distance !== undefined && (
+                                  <span className="ml-1 text-[#CC7357]">
+                                    ({job.distance.toFixed(1)} km)
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          )}
 
-                        <div className="mt-4 flex items-center">
-                          <div className="h-8 w-8 rounded-full overflow-hidden bg-gray-200 mr-2">
-                            {job.customer.avatar_url ? (
-                              <img
-                                src={job.customer.avatar_url || "/placeholder.svg"}
-                                alt={job.customer.full_name}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <User className="h-full w-full p-1 text-gray-400" />
+                          {/* Date Posted */}
+                          <div className="flex items-center mt-1 text-sm text-gray-500">
+                            <Clock className="h-4 w-4 mr-1 text-gray-400" />
+                            <span>Posted {formatDate(job.created_at)}</span>
+                          </div>
+
+                          {/* Tags */}
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {/* Service Type */}
+                            {job.service && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                {job.service.name}
+                              </span>
+                            )}
+
+                            {/* Urgency */}
+                            {job.urgency_level && (
+                              <span
+                                className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getUrgencyColor(
+                                  job.urgency_level
+                                )}`}
+                              >
+                                {job.urgency_level.charAt(0).toUpperCase() + job.urgency_level.slice(1)}
+                              </span>
+                            )}
+
+                            {/* Required Skills */}
+                            {job.required_skills && job.required_skills.length > 0 &&
+                              job.required_skills.slice(0, 3).map((skill: string, index: number) => (
+                                <span
+                                  key={index}
+                                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#F5F5DC] text-[#CC7357]"
+                                >
+                                  {skill}
+                                </span>
+                              ))
+                            }
+
+                            {job.required_skills && job.required_skills.length > 3 && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                +{job.required_skills.length - 3} more
+                              </span>
                             )}
                           </div>
-                          <span className="text-sm text-gray-600">{job.customer.full_name}</span>
                         </div>
                       </div>
+                    </div>
 
-                      <div className="flex flex-col gap-2">
-                        <Link
-                          to={`/jobs/${job.id}`}
-                          className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors text-center"
-                        >
-                          View Details
-                        </Link>
-
-                        <span className="text-xs text-gray-500 text-center">
-                          {job.applications.length} application{job.applications.length !== 1 ? "s" : ""}
-                        </span>
+                    <div className="mt-4 md:mt-0 md:ml-6 flex flex-col items-end">
+                      <div className="text-lg font-medium text-gray-900">
+                        {job.budget_min === job.budget_max
+                          ? `KES ${job.budget_min}`
+                          : `KES ${job.budget_min} - ${job.budget_max}`}
                       </div>
+
+                      {/* Match score if available */}
+                      {job.skillMatchScore !== undefined && (
+                        <div className="mt-1 text-sm">
+                          <div className="flex items-center">
+                            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-green-500 rounded-full"
+                                style={{ width: `${job.skillMatchScore * 100}%` }}
+                              ></div>
+                            </div>
+                            <span className="ml-2 text-gray-500">
+                              {Math.round(job.skillMatchScore * 100)}% match
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <Link
+                        to={`/jobs/${job.id}`}
+                        className="mt-4 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#CC7357] hover:bg-[#B66347] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#CC7357]"
+                      >
+                        View Details
+                      </Link>
                     </div>
                   </div>
-                )
-              })}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -419,4 +291,3 @@ function FindJobsPage() {
 }
 
 export default FindJobsPage
-

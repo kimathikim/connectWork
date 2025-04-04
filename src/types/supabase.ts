@@ -165,6 +165,7 @@ export interface Database {
           status: string
           payment_status: string | null
           assigned_worker_id: string | null
+          required_skills: string[] | null
           created_at: string
           updated_at: string | null
         }
@@ -181,6 +182,7 @@ export interface Database {
           status?: string
           payment_status?: string | null
           assigned_worker_id?: string | null
+          required_skills?: string[] | null
           created_at?: string
           updated_at?: string | null
         }
@@ -197,6 +199,7 @@ export interface Database {
           status?: string
           payment_status?: string | null
           assigned_worker_id?: string | null
+          required_skills?: string[] | null
           created_at?: string
           updated_at?: string | null
         }
@@ -243,6 +246,7 @@ export interface Database {
           comment: string | null
           helpful_count: number
           unhelpful_count: number
+          review_status: string
           created_at: string
         }
         Insert: {
@@ -265,10 +269,11 @@ export interface Database {
           comment?: string | null
           helpful_count?: number
           unhelpful_count?: number
+          review_status?: string
           created_at?: string
         }
       }
-   
+
       messages: {
         Row: {
           id: string

@@ -110,14 +110,14 @@ function CustomerProfilePage() {
     <div className="min-h-screen bg-[#F5F5DC] py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         {/* Back button */}
-        <button 
-          onClick={() => navigate(-1)} 
+        <button
+          onClick={() => navigate(-1)}
           className="flex items-center text-gray-600 mb-6 hover:text-[#CC7357]"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           Back
         </button>
-        
+
         <div className="bg-white rounded-lg shadow-md overflow-hidden">
           {/* Profile Header */}
           <div className="bg-[#CC7357] p-6 text-white">
@@ -218,7 +218,7 @@ function CustomerProfilePage() {
                         )}
                         <div className="mt-3 flex justify-between items-center">
                           <div className="text-sm font-medium text-gray-900">
-                            ${job.budget_min} - ${job.budget_max}
+                            KES {job.budget_min} - {job.budget_max}
                           </div>
                           <span className="text-[#CC7357] text-sm">View Details →</span>
                         </div>

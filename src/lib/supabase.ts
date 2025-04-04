@@ -32,22 +32,22 @@ const testConnection = async () => {
     const { data: connectionTest, error: connectionError } = await supabase
       .from('profiles')
       .select('count(*)', { count: 'exact', head: true });
-    
+
     if (connectionError) {
       console.error("Supabase connection error:", connectionError);
       return;
     }
-    
+
     // If we get here, the connection is successful
     console.log("Supabase connection successful");
-    
+
     // Then check if other essential tables exist
     const tables = ['worker_profiles', 'services', 'jobs', 'job_applications'];
     for (const table of tables) {
       const { error: tableError } = await supabase
         .from(table)
         .select('count(*)', { count: 'exact', head: true });
-      
+
       if (tableError) {
         console.error(`Error checking ${table}:`, tableError);
       }
@@ -90,12 +90,12 @@ export const getWorkerProfile = async (workerId: string) => {
     .single()
 
   if (error) throw error
-  
+
   // Add default avatar_url if it doesn't exist
   if (data && data.profile) {
     data.profile.avatar_url = data.profile.avatar_url || null;
   }
-  
+
   return data
 }
 
@@ -108,6 +108,7 @@ export const createJob = async (jobData: {
   budget_min: number
   budget_max: number
   urgency_level: string
+  required_skills?: string[]
 }) => {
   try {
     // Input validation
@@ -216,6 +217,12 @@ export const getAvailableJobs = async (
     minBudget?: number
     maxBudget?: number
     urgency?: string[]
+    datePosted?: string // 'today', 'week', 'month', 'any'
+    requiredSkills?: string[]
+    maxDistance?: number
+    sortBy?: string // 'date', 'budget', 'relevance'
+    sortOrder?: 'asc' | 'desc'
+    coordinates?: { lat: number; lon: number }
   } = {},
 ) => {
   let query = supabase
@@ -224,10 +231,10 @@ export const getAvailableJobs = async (
       *,
       customer:profiles!customer_id(*),
       service:services(*),
-      applications:job_applications(count)
+      applications:job_applications(count),
+      required_skills
     `)
     .eq("status", "open")
-    .order("created_at", { ascending: false })
 
   // Apply filters
   if (filters.serviceIds && filters.serviceIds.length > 0) {
@@ -250,10 +257,141 @@ export const getAvailableJobs = async (
     query = query.in("urgency_level", filters.urgency)
   }
 
+  // Filter by date posted
+  if (filters.datePosted) {
+    const now = new Date();
+    let startDate;
+
+    switch (filters.datePosted) {
+      case 'today':
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        break;
+      case 'month':
+        startDate = new Date(now.setMonth(now.getMonth() - 1));
+        break;
+      default:
+        startDate = null;
+    }
+
+    if (startDate) {
+      query = query.gte('created_at', startDate.toISOString());
+    }
+  }
+
+  // Execute the query
   const { data, error } = await query
 
   if (error) throw error
-  return data
+
+  let filteredData = data;
+
+  // Filter by required skills if provided
+  if (filters.requiredSkills && filters.requiredSkills.length > 0) {
+    const normalizedSkills = filters.requiredSkills.map(skill => skill.toLowerCase().trim());
+
+    filteredData = filteredData.filter(job => {
+      // If job has no required skills, include it in results
+      if (!job.required_skills || job.required_skills.length === 0) {
+        return true;
+      }
+
+      // Check if any of the job's required skills match the filter skills
+      const jobSkills = job.required_skills.map((skill: string) => skill.toLowerCase().trim());
+      return normalizedSkills.some(skill => jobSkills.includes(skill));
+    });
+  }
+
+  // Filter by distance if location/coordinates and maxDistance are provided
+  if ((filters.location || filters.coordinates) && filters.maxDistance) {
+    try {
+      // Import geocoding function
+      const { geocodeLocation, calculateDistance } = await import('./geolocation');
+
+      // Get coordinates for the search location
+      let coords;
+      if (filters.coordinates) {
+        // Use provided coordinates directly
+        coords = filters.coordinates;
+      } else if (filters.location) {
+        // Geocode the location string
+        coords = await geocodeLocation(filters.location);
+      } else {
+        throw new Error('No location information provided');
+      }
+
+      // Filter jobs by distance and add distance to each job
+      filteredData = filteredData.filter(job => {
+        // Skip jobs without location coordinates
+        if (!job.latitude || !job.longitude) {
+          return true; // Include jobs without coordinates
+        }
+
+        const distance = calculateDistance(
+          coords.lat,
+          coords.lon,
+          job.latitude,
+          job.longitude
+        );
+
+        // Add distance to job object
+        job.distance = distance;
+
+        // Filter by maximum distance
+        return distance <= filters.maxDistance!;
+      });
+    } catch (error) {
+      console.error("Error filtering by distance:", error);
+      // Continue without distance filtering if geocoding fails
+    }
+  }
+
+  // Sort results
+  if (filters.sortBy) {
+    const sortOrder = filters.sortOrder === 'asc' ? 1 : -1;
+
+    switch (filters.sortBy) {
+      case 'date':
+        filteredData.sort((a, b) => {
+          return sortOrder * (new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        });
+        break;
+      case 'budget':
+        filteredData.sort((a, b) => {
+          return sortOrder * ((a.budget_min + a.budget_max) / 2 - (b.budget_min + b.budget_max) / 2);
+        });
+        break;
+      case 'relevance':
+        // If we have skills to match, sort by relevance
+        if (filters.requiredSkills && filters.requiredSkills.length > 0) {
+          const { calculateSkillMatchScore } = require('./skill-matching');
+
+          filteredData.forEach(job => {
+            job.relevanceScore = calculateSkillMatchScore(
+              filters.requiredSkills || [],
+              job.required_skills || []
+            );
+          });
+
+          filteredData.sort((a, b) => sortOrder * (b.relevanceScore - a.relevanceScore));
+        }
+        break;
+      default:
+        // Default sort by date
+        filteredData.sort((a, b) => {
+          return -1 * (new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        });
+    }
+  } else {
+    // Default sort by date (newest first)
+    filteredData.sort((a, b) => {
+      return -1 * (new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    });
+  }
+
+  return filteredData;
 }
 
 export const updateWorkerServices = async (workerId: string, services: any[]) => {
@@ -263,22 +401,22 @@ export const updateWorkerServices = async (workerId: string, services: any[]) =>
       .from("worker_services")
       .delete()
       .eq("worker_id", workerId);
-    
+
     if (deleteError) throw deleteError;
-    
+
     // Then insert new services with rates
     const formattedServices = services.map(service => ({
       worker_id: workerId,
       service_id: service.service_id,
       rate: service.rate
     }));
-    
+
     const { data, error } = await supabase
       .from("worker_services")
       .insert(formattedServices);
-      
+
     if (error) throw error;
-    
+
     return data;
   } catch (error) {
     console.error("Error updating worker services:", error);
@@ -293,9 +431,9 @@ export const updateWorkerAvailability = async (workerId: string, availability: a
       .from("worker_availability")
       .delete()
       .eq("worker_id", workerId);
-    
+
     if (deleteError) throw deleteError;
-    
+
     // Then insert new availability
     const formattedAvailability = availability.map(slot => ({
       worker_id: workerId,
@@ -303,13 +441,13 @@ export const updateWorkerAvailability = async (workerId: string, availability: a
       start_time: slot.start_time,
       end_time: slot.end_time
     }));
-    
+
     const { data, error } = await supabase
       .from("worker_availability")
       .insert(formattedAvailability);
-      
+
     if (error) throw error;
-    
+
     return data;
   } catch (error) {
     console.error("Error updating worker availability:", error);
@@ -330,9 +468,9 @@ export const getWorkerEarnings = async (workerId: string) => {
       `)
       .eq("worker_id", workerId)
       .order("payment_date", { ascending: false });
-      
+
     if (error) throw error;
-    
+
     return data;
   } catch (error) {
     console.error("Error getting worker earnings:", error);
@@ -389,9 +527,148 @@ export const getServices = async () => {
   return data
 }
 
+// Search helpers
+export const searchWorkers = async (params: {
+  query?: string;
+  serviceId?: string;
+  location?: string;
+  maxDistance?: number;
+  minRating?: number;
+  maxRate?: number;
+  minRate?: number;
+  skills?: string[];
+  coordinates?: { lat: number; lon: number };
+}) => {
+  const {
+    query,
+    serviceId,
+    location,
+    maxDistance = 50, // Default to 50km
+    minRating = 0,
+    maxRate,
+    minRate = 0,
+    skills = [],
+    coordinates
+  } = params;
+
+  let queryBuilder = supabase
+    .from("worker_profiles")
+    .select(`
+      *,
+      profile:profiles!worker_profiles_id_fkey(id, full_name, email, phone, location, avatar_url, latitude, longitude),
+      services:worker_services(
+        *,
+        service:services(*)
+      ),
+      skills:worker_skills(skill)
+    `)
+    .gte("avg_rating", minRating)
+    .gte("hourly_rate", minRate)
+
+  // Filter by maximum hourly rate if provided
+  if (maxRate) {
+    queryBuilder = queryBuilder.lte("hourly_rate", maxRate);
+  }
+
+  // Filter by service if provided
+  if (serviceId) {
+    queryBuilder = queryBuilder.eq("services.service_id", serviceId);
+  }
+
+  // Execute the query
+  const { data, error } = await queryBuilder;
+
+  if (error) throw error;
+
+  // Filter results by search query if provided
+  let filteredData = data;
+
+  if (query) {
+    const lowerQuery = query.toLowerCase();
+    filteredData = filteredData.filter((worker: any) => {
+      return (
+        worker.profile.full_name.toLowerCase().includes(lowerQuery) ||
+        worker.profession?.toLowerCase().includes(lowerQuery) ||
+        worker.services.some((s: any) => s.service.name.toLowerCase().includes(lowerQuery))
+      );
+    });
+  }
+
+  // Filter by skills if provided
+  if (skills.length > 0) {
+    const normalizedSkills = skills.map(skill => skill.toLowerCase().trim());
+
+    filteredData = filteredData.filter((worker: any) => {
+      const workerSkills = worker.skills.map((s: any) => s.skill.toLowerCase().trim());
+      return normalizedSkills.some(skill => workerSkills.includes(skill));
+    });
+  }
+
+  // Filter by location if provided
+  if (location || coordinates) {
+    try {
+      // Import geocoding function
+      const { geocodeLocation, calculateDistance } = await import('./geolocation');
+
+      // Get coordinates for the search location
+      let coords;
+      if (coordinates) {
+        // Use provided coordinates directly
+        coords = coordinates;
+      } else if (location) {
+        // Geocode the location string
+        coords = await geocodeLocation(location);
+      } else {
+        throw new Error('No location information provided');
+      }
+
+      // Filter workers by distance and add distance to each worker
+      filteredData = filteredData.filter((worker: any) => {
+        // Skip workers without location coordinates
+        if (!worker.profile?.latitude || !worker.profile?.longitude) {
+          return false;
+        }
+
+        const distance = calculateDistance(
+          coords.lat,
+          coords.lon,
+          worker.profile.latitude,
+          worker.profile.longitude
+        );
+
+        // Add distance to worker object
+        worker.distance = distance;
+
+        // Filter by maximum distance
+        return distance <= maxDistance;
+      });
+
+      // Sort by distance
+      filteredData.sort((a: any, b: any) => a.distance - b.distance);
+    } catch (error) {
+      console.error("Error filtering by location:", error);
+      // Continue without location filtering if geocoding fails
+    }
+  }
+
+  return filteredData;
+}
+
 // Add this helper function to handle profile queries
 export const getUserType = async (userId: string) => {
   try {
+    // First try to get the current user's data
+    const { data: authData } = await supabase.auth.getUser();
+
+    // Get user email and name from auth data if available
+    let userEmail = '';
+    let userName = 'New User';
+
+    if (authData?.user) {
+      userEmail = authData.user.email || '';
+      userName = authData.user.user_metadata?.full_name || userEmail?.split('@')[0] || 'New User';
+    }
+
     const { data, error } = await supabase.from("profiles").select("user_type").eq("id", userId).single()
 
     if (error) {
@@ -403,14 +680,14 @@ export const getUserType = async (userId: string) => {
           .insert({
             id: userId,
             user_type: 'customer', // Default to customer
-            full_name: 'User',
-            email: 'user@example.com', // Will be updated later
+            full_name: userName,
+            email: userEmail, // Use actual email
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
           })
           .select('user_type')
           .single()
-          
+
         if (createError) throw createError
         return newProfile.user_type
       }
@@ -430,7 +707,7 @@ export const signUpWithProfile = async (email: string, password: string, userTyp
     email,
     password,
     options: {
-      data: { 
+      data: {
         user_type: userType,
         full_name: fullName
       }
@@ -503,7 +780,7 @@ export const getConversation = async (userId1: string, userId2: string) => {
       .order("created_at", { ascending: true });
 
     if (error) throw error;
-    
+
     // Return empty array if no messages found
     return data || [];
   } catch (error) {
@@ -520,11 +797,11 @@ export const checkUserExists = async (userId: string) => {
       .select("id")
       .eq("id", userId)
       .single();
-      
+
     if (error && error.code !== "PGRST116") {
       throw error;
     }
-    
+
     return !!data;
   } catch (error) {
     console.error("Error checking if user exists:", error);
@@ -611,9 +888,9 @@ export const getWorkerAppointments = async (workerId: string) => {
 export const updateAppointmentStatus = async (appointmentId: string, status: string) => {
   const { data, error } = await supabase
     .from("appointments")
-    .update({ 
-      status, 
-      updated_at: new Date().toISOString() 
+    .update({
+      status,
+      updated_at: new Date().toISOString()
     })
     .eq("id", appointmentId)
     .select()

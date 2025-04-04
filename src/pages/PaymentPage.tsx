@@ -205,8 +205,8 @@ function PaymentPage() {
       }, 3000);
     } catch (err) {
       console.error("Error processing payment:", err);
-      setError(typeof err === "object" && err !== null && "message" in err 
-        ? String(err.message) 
+      setError(typeof err === "object" && err !== null && "message" in err
+        ? String(err.message)
         : "Failed to process payment. Please try again.");
     } finally {
       setLoading(false);
@@ -219,7 +219,7 @@ function PaymentPage() {
         <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
           <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
-          <p className="text-gray-600 mb-6">Your payment of ${amount?.toFixed(2)} has been processed successfully.</p>
+          <p className="text-gray-600 mb-6">Your payment of KES {amount?.toFixed(2)} has been processed successfully.</p>
           <p className="text-gray-500 mb-6">You will be redirected to your dashboard shortly.</p>
           <button
             onClick={() => navigate("/dashboard")}
@@ -273,15 +273,15 @@ function PaymentPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Amount:</span>
-                <span className="font-medium">${amount?.toFixed(2)}</span>
+                <span className="font-medium">KES {amount?.toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Service Fee:</span>
-                <span className="font-medium">$0.00</span>
+                <span className="font-medium">KES 0.00</span>
               </div>
               <div className="flex justify-between pt-2 border-t border-gray-200">
                 <span className="text-gray-900 font-medium">Total:</span>
-                <span className="text-gray-900 font-medium">${amount?.toFixed(2)}</span>
+                <span className="text-gray-900 font-medium">KES {amount?.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -469,7 +469,7 @@ function PaymentPage() {
                 ) : (
                   <>
                     <Lock className="h-5 w-5" />
-                    <span>Pay ${amount?.toFixed(2)}</span>
+                    <span>Pay KES {amount?.toFixed(2)}</span>
                   </>
                 )}
               </button>

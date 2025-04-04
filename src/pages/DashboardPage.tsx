@@ -11,6 +11,7 @@ import {
   Search,
   Calendar,
   Edit,
+  MapPin,
 } from "lucide-react"
 import { supabase } from "../lib/supabase"
 import { checkUserAuth } from '../lib/auth-helpers';
@@ -38,20 +39,20 @@ function DashboardPage() {
   const initializePage = async () => {
     try {
       setLoading(true);
-      
+
       const { authenticated, user, authorized } = await checkUserAuth(
-        navigate, 
-        'customer', 
+        navigate,
+        'customer',
         '/dashboard'
       );
-      
+
       if (!authenticated || !authorized) return;
-      
+
       setUser(user);
-      
+
       // Load customer data
       await loadJobs(user.id);
-      
+
       setLoading(false);
     } catch (error) {
       console.error('Error loading dashboard:', error);
@@ -158,7 +159,7 @@ function DashboardPage() {
 
   const needsReview = (job: any) => {
     return (
-      job.status === "completed" && 
+      job.status === "completed" &&
       (!job.reviews || job.reviews.length === 0)
     );
   }
@@ -211,9 +212,9 @@ function DashboardPage() {
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-medium text-gray-700">Total Spent</h2>
-              <DollarSign className="h-8 w-8 text-[#CC7357]" />
+              <span className="h-8 w-8 text-[#CC7357] font-bold text-xl">KES</span>
             </div>
-            <p className="text-3xl font-bold text-gray-900">${stats.totalSpent.toFixed(2)}</p>
+            <p className="text-3xl font-bold text-gray-900">KES {stats.totalSpent.toFixed(2)}</p>
             <span className="text-sm text-gray-500 mt-2 inline-block">Across {stats.completedJobs} completed jobs</span>
           </div>
         </div>
@@ -313,11 +314,11 @@ function DashboardPage() {
                               </div>
 
                               <div className="flex items-center text-gray-500 text-sm">
-                                <DollarSign className="h-4 w-4 mr-1" />
+                                <span className="text-xs font-bold mr-1">KES</span>
                                 <span>
                                   {job.budget_min === job.budget_max
-                                    ? `$${job.budget_min}`
-                                    : `$${job.budget_min} - $${job.budget_max}`}
+                                    ? `${job.budget_min}`
+                                    : `${job.budget_min} - ${job.budget_max}`}
                                 </span>
                               </div>
 
@@ -424,7 +425,7 @@ function DashboardPage() {
                                 Leave Review
                               </Link>
                             )}
-                            
+
                             {/* Status display - no manual updates */}
                             {job.status !== "completed" && (
                               <div className="mt-2">
@@ -459,7 +460,8 @@ function DashboardPage() {
                     <User className="h-full w-full p-4 text-gray-400" />
                   )}
                 </div>
-                <h2 className="text-xl font-bold text-gray-900">{profile?.full_name}</h2>
+                <h2 className="text-xl font-bold text-gray-900">{profile?.full_name || user?.email?.split('@')[0] || "Customer"}</h2>
+                <p className="text-gray-500">{profile?.email || user?.email || "No email available"}</p>
                 <p className="text-gray-500">{profile?.location || "No location set"}</p>
 
                 <div className="mt-6">
@@ -496,6 +498,13 @@ function DashboardPage() {
                   <div className="flex items-center">
                     <Search className="h-5 w-5 text-[#CC7357] mr-3" />
                     <span>Find Workers</span>
+                  </div>
+                  <ChevronRight className="h-5 w-5 text-gray-400" />
+                </Link>
+                <Link to="/workers-map" className="flex items-center justify-between p-4 hover:bg-gray-50">
+                  <div className="flex items-center">
+                    <MapPin className="h-5 w-5 text-[#CC7357] mr-3" />
+                    <span>Workers Map</span>
                   </div>
                   <ChevronRight className="h-5 w-5 text-gray-400" />
                 </Link>

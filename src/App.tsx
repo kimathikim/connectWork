@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom"
-import { Header } from "./components/Header"
+import { SmartHeader } from "./components/SmartHeader"
+import WorkerProfileRedirect from "./components/WorkerProfileRedirect"
 import HomePage from "./pages/HomePage"
 import SearchPage from "./pages/SearchPage"
 import LoginPage from "./pages/LoginPage"
@@ -18,6 +19,7 @@ import ReviewsPage from "./pages/ReviewsPage"
 import PaymentPage from "./pages/PaymentPage"
 import CustomerProfilePage from "./pages/CustomerProfilePage"
 import JobApplicationsPage from "./pages/JobApplicationsPage"
+import WorkersMapPage from "./pages/WorkersMapPage"
 
 // Worker-specific pages
 import WorkerDashboardPage from "./pages/worker/WorkerDashboardPage"
@@ -34,38 +36,41 @@ import { supabase } from "./lib/supabase"
 import JobApplicationPage from "./pages/JobApplicationPage"
 import ReviewPage from "./pages/ReviewPage"
 
+// UI Components
+import { ToastProvider } from "./components/ui/toast"
+
 function App() {
-  const [dbInitialized, setDbInitialized] = useState(false)
+  const [_, setDbInitialized] = useState(false)
   const [dbError, setDbError] = useState<string | null>(null)
 
   useEffect(() => {
     const checkDatabase = async () => {
       try {
         // Check if profiles table exists and has data
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('profiles')
           .select('*', { count: 'exact', head: true })
-        
+
         if (error) {
           console.error("Database error:", error)
           setDbError(`Database error: ${error.message}. Code: ${error.code}`)
           return
         }
-        
+
         // Check if other essential tables exist
         const tables = ['worker_profiles', 'services', 'jobs', 'job_applications'];
         for (const table of tables) {
           const { error: tableError } = await supabase
             .from(table)
             .select('*', { count: 'exact', head: true });
-          
+
           if (tableError) {
             console.error(`Error checking ${table}:`, tableError);
             setDbError(`Table '${table}' may not be initialized. Error: ${tableError.message}`);
             return;
           }
         }
-        
+
         setDbInitialized(true)
       } catch (error) {
         console.error("Database check failed:", error)
@@ -91,18 +96,20 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5DC]">
-      <Header />
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/" element={<HomePage />} />
-        <Route path="/search" element={<SearchPage />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/jobs/:jobId" element={<JobDetailsPage />} />
-        <Route path="/reviews/:workerId" element={<ReviewsPage />} />
+    <ToastProvider>
+      <div className="min-h-screen bg-[#F5F5DC]">
+        <SmartHeader />
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<HomePage />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/jobs/:jobId" element={<JobDetailsPage />} />
+          <Route path="/reviews/:workerId" element={<ReviewsPage />} />
+          <Route path="/workers-map" element={<WorkersMapPage />} />
 
         {/* Protected Routes - Any authenticated user */}
         <Route
@@ -154,6 +161,11 @@ function App() {
               <WorkerProfilePage />
             </AuthGuard>
           }
+        />
+        {/* Redirect route for /workers/:workerId to /worker-profile/:workerId */}
+        <Route
+          path="/workers/:workerId"
+          element={<WorkerProfileRedirect />}
         />
         <Route
           path="/dashboard"
@@ -244,6 +256,7 @@ function App() {
         <Route path="/apply/:jobId" element={<JobApplicationPage />} />
       </Routes>
     </div>
+    </ToastProvider>
   )
 }
 

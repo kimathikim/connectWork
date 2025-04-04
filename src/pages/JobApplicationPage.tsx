@@ -9,7 +9,7 @@ import { ChevronLeft, Briefcase, DollarSign, MapPin } from "lucide-react"
 function JobApplicationPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
-  
+
   const [job, setJob] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -17,16 +17,16 @@ function JobApplicationPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [coverLetter, setCoverLetter] = useState("")
   const [proposedRate, setProposedRate] = useState(0)
-  
+
   useEffect(() => {
     fetchJobDetails()
     checkCurrentUser()
   }, [jobId])
-  
+
   const fetchJobDetails = async () => {
     try {
       if (!jobId) return
-      
+
       const { data, error } = await supabase
         .from("jobs")
         .select(`
@@ -35,9 +35,9 @@ function JobApplicationPage() {
         `)
         .eq("id", jobId)
         .single()
-        
+
       if (error) throw error
-      
+
       setJob(data)
       setProposedRate(data.budget_min || 0)
     } catch (err) {
@@ -47,11 +47,11 @@ function JobApplicationPage() {
       setLoading(false)
     }
   }
-  
+
   const checkCurrentUser = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     setCurrentUser(user)
-    
+
     if (user) {
       // Check if user has already applied
       const { data } = await supabase
@@ -60,7 +60,7 @@ function JobApplicationPage() {
         .eq("job_id", jobId)
         .eq("worker_id", user.id)
         .single()
-        
+
       if (data) {
         // Already applied, redirect back to job
         navigate(`/jobs/${jobId}`, { state: { alreadyApplied: true } })
@@ -70,26 +70,26 @@ function JobApplicationPage() {
       navigate("/login", { state: { from: `/apply/${jobId}` } })
     }
   }
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     try {
       setSubmitting(true)
       setError(null)
-      
+
       if (!currentUser || !jobId) {
         setError("You must be logged in to apply")
         return
       }
-      
+
       if (!coverLetter.trim()) {
         setError("Please provide a cover letter")
         return
       }
-      
+
       await applyForJob(jobId, currentUser.id, coverLetter, proposedRate)
-      
+
       // Redirect back to job with success message
       navigate(`/jobs/${jobId}`, { state: { applicationSuccess: true } })
     } catch (err: any) {
@@ -99,7 +99,7 @@ function JobApplicationPage() {
       setSubmitting(false)
     }
   }
-  
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center">
@@ -107,7 +107,7 @@ function JobApplicationPage() {
       </div>
     )
   }
-  
+
   if (!job) {
     return (
       <div className="min-h-screen bg-[#F5F5DC] p-6">
@@ -121,7 +121,7 @@ function JobApplicationPage() {
       </div>
     )
   }
-  
+
   return (
     <div className="min-h-screen bg-[#F5F5DC] p-6">
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-md">
@@ -130,27 +130,27 @@ function JobApplicationPage() {
             <ChevronLeft className="h-4 w-4 inline mr-1" />
             Back to Job Details
           </Link>
-          
+
           <h1 className="text-2xl font-bold text-gray-900 mt-4">Apply for: {job.title}</h1>
-          
+
           <div className="mt-4 flex flex-wrap gap-4 text-sm text-gray-600">
             <div className="flex items-center">
               <MapPin className="h-4 w-4 mr-1 text-gray-400" />
               {job.location}
             </div>
-            
+
             <div className="flex items-center">
               <DollarSign className="h-4 w-4 mr-1 text-gray-400" />
               ${job.budget_min} - ${job.budget_max}
             </div>
-            
+
             <div className="flex items-center">
               <Briefcase className="h-4 w-4 mr-1 text-gray-400" />
               {job.status}
             </div>
           </div>
         </div>
-        
+
         <div className="p-6">
           <form onSubmit={handleSubmit}>
             {error && (
@@ -158,10 +158,10 @@ function JobApplicationPage() {
                 {error}
               </div>
             )}
-            
+
             <div className="mb-6">
               <label className="block text-gray-700 font-medium mb-2">
-                Proposed Rate ($ per hour)
+                Proposed Rate (KES per hour)
               </label>
               <input
                 type="number"
@@ -172,10 +172,10 @@ function JobApplicationPage() {
                 required
               />
               <p className="text-sm text-gray-500 mt-1">
-                Suggested range: ${job.budget_min} - ${job.budget_max}
+                Suggested range: KES {job.budget_min} - KES {job.budget_max}
               </p>
             </div>
-            
+
             <div className="mb-6">
               <label className="block text-gray-700 font-medium mb-2">
                 Cover Letter
@@ -189,7 +189,7 @@ function JobApplicationPage() {
                 required
               />
             </div>
-            
+
             <div className="flex justify-end">
               <button
                 type="submit"

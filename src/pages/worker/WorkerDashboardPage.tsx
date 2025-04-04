@@ -4,7 +4,6 @@ import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import {
   Briefcase,
-  DollarSign,
   Star,
   Clock,
   Calendar,
@@ -19,10 +18,13 @@ import {
 import { checkUserAuth, getUserProfile } from "../../lib/auth-helpers"
 import { getWorkerJobs, getWorkerEarnings, supabase } from "../../lib/supabase"
 import { Database } from "../../types/supabase";
+import { useToast } from "../../components/ui/toast"
+import { ensureWorkerProfile } from "../../lib/worker-profile-utils";
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
 function WorkerDashboardPage() {
   const navigate = useNavigate()
+  const { addToast } = useToast()
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<any>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -39,16 +41,16 @@ function WorkerDashboardPage() {
 
   const fetchWorkerProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("worker_profiles")
-        .select("*")
-        .eq("id", userId)
-        .single();
-      
-      if (error) throw error;
-      setWorkerProfile(data);
+      // Use the ensureWorkerProfile utility to make sure the worker profile exists
+      const workerData = await ensureWorkerProfile(userId);
+
+      // Set the worker profile state
+      setWorkerProfile(workerData);
+      return workerData;
     } catch (err) {
       console.error("Error fetching worker profile:", err);
+      addToast("Failed to fetch worker profile. Please try again.", "error");
+      return null;
     }
   };
 
@@ -59,27 +61,38 @@ function WorkerDashboardPage() {
   const initializePage = async () => {
     try {
       setLoading(true)
-      
+
       const { authenticated, user, authorized } = await checkUserAuth(
-        navigate, 
-        'worker', 
+        navigate,
+        'worker',
         '/worker/dashboard'
       )
-      
+
       if (!authenticated || !authorized) return
-      
+
       setUser(user)
-      
+
       // Get full profile data
       const userProfile = await getUserProfile(user.id)
       setProfile(userProfile)
-      
-      // Load worker data
-      await Promise.all([loadJobs(user.id), loadEarnings(user.id)])
-      
+
+      // Get worker profile data
+      const workerData = await fetchWorkerProfile(user.id)
+
+      if (workerData) {
+        // Load worker data using worker ID
+        await Promise.all([loadJobs(user.id), loadEarnings(workerData.id)])
+        addToast("Dashboard data loaded successfully", "success")
+      } else {
+        // Fallback to user ID if worker profile not found
+        await Promise.all([loadJobs(user.id), loadEarnings(user.id)])
+        addToast("Some data may not be available", "info")
+      }
+
       setLoading(false)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading dashboard:', error)
+      addToast(error.message || "Failed to load dashboard data", "error")
       setLoading(false)
     }
   }
@@ -104,25 +117,42 @@ function WorkerDashboardPage() {
         pendingApplications,
         completedJobs,
       }))
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error loading jobs:", error)
+      addToast(error.message || "Failed to load job data", "error")
     }
   }
 
-  const loadEarnings = async (userId: string) => {
+  const loadEarnings = async (workerId: string) => {
     try {
-      const workerEarnings = await getWorkerEarnings(userId)
+      console.log("Loading earnings for worker ID:", workerId)
+      const workerEarnings = await getWorkerEarnings(workerId)
+
+      if (!workerEarnings || workerEarnings.length === 0) {
+        console.log("No earnings found for worker ID:", workerId)
+      } else {
+        console.log("Found", workerEarnings.length, "earnings records")
+      }
+
       setEarnings(workerEarnings || [])
 
       // Calculate total earnings
       const totalEarnings = workerEarnings.reduce((sum: number, payment: any) => sum + payment.amount, 0)
 
+      // Calculate average rating if available
+      let averageRating = 0;
+      if (workerProfile && workerProfile.avg_rating) {
+        averageRating = workerProfile.avg_rating;
+      }
+
       setStats((prev) => ({
         ...prev,
         totalEarnings,
+        averageRating
       }))
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error loading earnings:", error)
+      addToast(error.message || "Failed to load earnings data", "error")
     }
   }
 
@@ -192,9 +222,9 @@ function WorkerDashboardPage() {
           <div className="bg-white rounded-lg shadow-md p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-medium text-gray-700">Total Earnings</h2>
-              <DollarSign className="h-8 w-8 text-[#CC7357]" />
+              <span className="h-8 w-8 text-[#CC7357] font-bold text-xl">KES</span>
             </div>
-            <p className="text-3xl font-bold text-gray-900">${stats.totalEarnings.toFixed(2)}</p>
+            <p className="text-3xl font-bold text-gray-900">KES {stats.totalEarnings.toFixed(2)}</p>
             <Link to="/worker/earnings" className="text-sm text-[#CC7357] hover:underline mt-2 inline-block">
               View earnings
             </Link>
@@ -294,8 +324,9 @@ function WorkerDashboardPage() {
                     <User className="h-full w-full p-4 text-gray-400" />
                   )}
                 </div>
-                <h2 className="text-xl font-bold text-gray-900">{profile?.full_name || "Worker Name"}</h2>
-                <p className="text-[#6B8E23] font-medium">{workerProfile?.profession || "Professional Worker"}</p>
+                <h2 className="text-xl font-bold text-gray-900">{profile?.full_name || user?.email?.split('@')[0] || "Professional"}</h2>
+                <p className="text-gray-500">{profile?.email || user?.email || "No email available"}</p>
+                <p className="text-[#6B8E23] font-medium">{workerProfile?.headline || "Professional Worker"}</p>
 
                 <div className="mt-4 flex justify-center">
                   <div className="flex items-center">
@@ -372,10 +403,12 @@ function WorkerDashboardPage() {
                     <div key={payment.id} className="p-4">
                       <div className="flex justify-between items-center">
                         <div>
-                          <h3 className="font-medium text-gray-900">{payment.job.title}</h3>
+                          <h3 className="font-medium text-gray-900">
+                            {payment.job ? payment.job.title : 'Payment'}
+                          </h3>
                           <p className="text-sm text-gray-500 mt-1">{formatDate(payment.payment_date)}</p>
                         </div>
-                        <span className="font-bold text-gray-900">${payment.amount.toFixed(2)}</span>
+                        <span className="font-bold text-gray-900">KES {payment.amount.toFixed(2)}</span>
                       </div>
                     </div>
                   ))

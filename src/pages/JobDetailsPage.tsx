@@ -116,17 +116,17 @@ function JobDetailsPage() {
 
   const handleApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     try {
       setIsApplying(true)
-      
+
       if (!currentUser || !jobId) {
         setError("You must be logged in to apply")
         return
       }
-      
+
       await applyForJob(jobId, currentUser.id, coverLetter, proposedRate)
-      
+
       setShowApplyForm(false)
       setHasApplied(true)
       alert("Application submitted successfully!")
@@ -140,12 +140,12 @@ function JobDetailsPage() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     try {
       if (!currentUser || !job?.customer?.id || !message.trim()) {
         return
       }
-      
+
       const { error } = await supabase.from("messages").insert({
         job_id: jobId,
         sender_id: currentUser.id,
@@ -153,9 +153,9 @@ function JobDetailsPage() {
         content: message,
         created_at: new Date().toISOString()
       })
-      
+
       if (error) throw error
-      
+
       setMessage("")
       setShowMessageForm(false)
       alert("Message sent successfully!")
@@ -170,11 +170,11 @@ function JobDetailsPage() {
       navigate("/login", { state: { from: `/job/${jobId}` } });
       return;
     }
-    
+
     if (hasApplied) {
       return; // Already applied
     }
-    
+
     // Navigate to the dedicated application page instead of showing inline form
     navigate(`/apply/${jobId}`);
   };
@@ -184,7 +184,7 @@ function JobDetailsPage() {
       navigate("/login", { state: { from: `/jobs/${jobId}` } });
       return;
     }
-    
+
     if (job?.customer?.id) {
       navigate(`/messages?user=${job.customer.id}&job=${jobId}`);
     }
@@ -275,7 +275,7 @@ function JobDetailsPage() {
                   </button>
                 )}
 
-                <StartConversationButton 
+                <StartConversationButton
                   userId={job.customer.id}
                   jobId={job.id}
                   variant="outline"
@@ -311,12 +311,12 @@ function JobDetailsPage() {
               <div className="bg-gray-50 p-4 rounded-lg">
                 <h3 className="font-medium text-gray-900 mb-3">Budget</h3>
                 <div className="flex items-center gap-2 text-xl font-bold text-gray-900">
-                  <DollarSign className="h-5 w-5 text-[#CC7357]" />
+                  <span className="text-[#CC7357] font-bold">KES</span>
                   {job.budget_min === job.budget_max ? (
-                    <span>${job.budget_min}</span>
+                    <span>{job.budget_min}</span>
                   ) : (
                     <span>
-                      ${job.budget_min} - ${job.budget_max}
+                      {job.budget_min} - {job.budget_max}
                     </span>
                   )}
                 </div>

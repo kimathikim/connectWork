@@ -49,7 +49,7 @@ export function WorkerCard({ name, profession, rating, location, hourlyRate, ima
         </div>
 
         <div className="mt-4 flex items-center justify-between">
-          <span className="text-gray-900 font-bold">${hourlyRate}/hr</span>
+          <span className="text-gray-900 font-bold">KES {hourlyRate}/hr</span>
           <button
             onClick={handleBookNow}
             className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347] transition-colors"

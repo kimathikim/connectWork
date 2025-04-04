@@ -172,7 +172,7 @@ function WorkerProfilePage() {
                 </div>
 
                 <h1 className="text-2xl font-bold text-gray-900">{worker.profile.full_name}</h1>
-                <p className="text-[#6B8E23] font-medium mt-1">{worker.profession}</p>
+                <p className="text-[#6B8E23] font-medium mt-1">{worker.headline}</p>
 
                 <div className="flex items-center justify-center mt-2">
                   <Star className="h-5 w-5 text-yellow-400 fill-current" />
@@ -193,21 +193,21 @@ function WorkerProfilePage() {
               <div className="p-6 border-b border-gray-200">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg font-medium text-gray-900">Hourly Rate</h2>
-                  <span className="text-xl font-bold text-gray-900">${worker.hourly_rate}/hr</span>
+                  <span className="text-xl font-bold text-gray-900">KES {worker.hourly_rate}/hr</span>
                 </div>
 
                 <div className="flex space-x-4 mt-6">
                   {currentUser?.id !== worker.id ? (
                     <>
-                      <Button 
-                        variant="default" 
+                      <Button
+                        variant="default"
                         onClick={handleBookNow}
                         className="bg-[#CC7357] hover:bg-[#B66347]"
                       >
                         Book Now
                       </Button>
-                      
-                      <StartConversationButton 
+
+                      <StartConversationButton
                         userId={worker.id}
                         variant="outline"
                         className="border-gray-300"
@@ -297,7 +297,7 @@ function WorkerProfilePage() {
                         <h3 className="font-medium text-gray-900">{service.service.name}</h3>
                         <div className="flex justify-between items-center mt-2">
                           <span className="text-gray-500">{service.service.category}</span>
-                          <span className="font-bold text-gray-900">${service.rate}/hr</span>
+                          <span className="font-bold text-gray-900">KES {service.rate}/hr</span>
                         </div>
                       </div>
                     ))}
@@ -390,7 +390,7 @@ function WorkerProfilePage() {
                     <ul className="space-y-2">
                       <li className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
-                        Professional {worker.profession} Certification
+                        Professional {worker.headline} Certification
                       </li>
                       <li className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>

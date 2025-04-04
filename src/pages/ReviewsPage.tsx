@@ -21,6 +21,7 @@ interface Review {
   }
   helpful_count: number
   unhelpful_count: number
+  job_id: string
 }
 
 function ReviewsPage() {
@@ -92,6 +93,7 @@ function ReviewsPage() {
         },
         helpful_count: review.helpful_count || 0,
         unhelpful_count: review.unhelpful_count || 0,
+        job_id: review.job_id,
       }))
 
       setReviews(transformedReviews)
