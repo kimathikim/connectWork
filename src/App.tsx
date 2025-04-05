@@ -99,6 +99,7 @@ function App() {
     <ToastProvider>
       <div className="min-h-screen bg-[#F5F5DC]">
         <SmartHeader />
+        <div className="pt-20"> {/* Add padding-top to account for fixed header */}
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<HomePage />} />
@@ -112,6 +113,14 @@ function App() {
           <Route path="/workers-map" element={<WorkersMapPage />} />
 
         {/* Protected Routes - Any authenticated user */}
+        <Route
+          path="/profile"
+          element={
+            <AuthGuard>
+              <ProfileSettingsPage />
+            </AuthGuard>
+          }
+        />
         <Route
           path="/profile-settings"
           element={
@@ -255,6 +264,7 @@ function App() {
         />
         <Route path="/apply/:jobId" element={<JobApplicationPage />} />
       </Routes>
+      </div> {/* Close the padding div */}
     </div>
     </ToastProvider>
   )

@@ -3,6 +3,7 @@ import { useState, useEffect } from "react"
 import { useNavigate, useLocation, useParams, useSearchParams, Link } from "react-router-dom"
 import { Calendar, Clock, DollarSign, MapPin, AlertCircle, ChevronLeft } from "lucide-react"
 import { supabase, createAppointment } from "../lib/supabase"
+import { useToast } from "../components/ui/toast"
 
 interface LocationState {
   workerId?: string
@@ -14,6 +15,7 @@ function BookingPage() {
   const location = useLocation()
   const { jobId } = useParams<{ jobId: string }>()
   const [searchParams] = useSearchParams()
+  const { addToast } = useToast()
   const workerId = location.state?.workerId || searchParams.get('worker')
   const serviceId = location.state?.serviceId || searchParams.get('service')
 
@@ -302,18 +304,37 @@ function BookingPage() {
 
       console.log("Submitting appointment data:", appointmentData)
 
-      // Use the createAppointment function from supabase.ts
-      const appointment = await createAppointment(appointmentData)
+      try {
+        // Use the createAppointment function from supabase.ts
+        const appointment = await createAppointment(appointmentData)
 
-      // Only navigate after successful submission
-      navigate("/booking-success", {
-        state: {
-          appointment: appointment,
-          worker: worker,
-          service: service,
-          rate: workerService.rate
+        // Show success message
+        addToast("Appointment booked successfully!", "success")
+
+        // Only navigate after successful submission
+        navigate("/booking-success", {
+          state: {
+            appointment: appointment,
+            worker: worker,
+            service: service,
+            rate: workerService.rate
+          }
+        })
+      } catch (appointmentError: any) {
+        console.error("Error creating appointment:", appointmentError)
+
+        // Show a more user-friendly error message
+        if (appointmentError.message.includes('does not exist')) {
+          setError("The appointment system is being set up. Please try again in a few moments.")
+          addToast("The system is preparing the appointment feature. Please try again shortly.", "error")
+        } else {
+          setError(appointmentError.message || "Failed to create appointment. Please try again.")
+          addToast("Failed to book appointment. Please try again.", "error")
         }
-      })
+
+        // Don't rethrow, we'll handle it here
+        return
+      }
     } catch (err: any) {
       console.error("Error creating booking:", err)
       setError(err.message || "Failed to create booking. Please try again.")

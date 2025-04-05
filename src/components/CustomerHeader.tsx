@@ -8,7 +8,10 @@ export function CustomerHeader() {
   const location = useLocation()
   const navigate = useNavigate()
   const { addToast } = useToast()
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState({
+    mobile: false,
+    profile: false
+  })
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [notifications, setNotifications] = useState<any[]>([])
@@ -56,34 +59,40 @@ export function CustomerHeader() {
       if (!user) return
 
       try {
-        // Check if notifications table exists first
+        // Use a more robust approach to check if the table exists
         const { error: checkError } = await supabase
           .from('notifications')
           .select('count(*)', { count: 'exact', head: true })
           .limit(1);
 
         if (checkError) {
-          console.log('Notifications table may not exist yet:', checkError.message);
+          console.warn('Notifications table may not exist yet:', checkError.message);
           // Set empty notifications to avoid errors
           setNotifications([]);
           return;
         }
 
-        // If table exists, fetch notifications
-        const { data, error } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("is_read", false)
-          .order("created_at", { ascending: false })
-          .limit(5);
+        // If we get here, the table exists, so fetch notifications
+        try {
+          const { data, error } = await supabase
+            .from("notifications")
+            .select("*")
+            .eq("user_id", user.id)
+            .eq("is_read", false)
+            .order("created_at", { ascending: false })
+            .limit(5);
 
-        if (error) {
-          console.error("Error fetching notifications:", error);
-          return;
+          if (error) {
+            console.error("Error fetching notifications:", error);
+            setNotifications([]);
+            return;
+          }
+
+          setNotifications(data || []);
+        } catch (fetchError) {
+          console.error("Error fetching notifications:", fetchError);
+          setNotifications([]);
         }
-
-        setNotifications(data || []);
       } catch (err) {
         console.error("Error in notifications process:", err);
         // Set empty notifications as fallback
@@ -107,7 +116,7 @@ export function CustomerHeader() {
   }
 
   return (
-    <header className="bg-white shadow-sm">
+    <header className="bg-white shadow-sm fixed top-0 left-0 right-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center">
@@ -115,7 +124,7 @@ export function CustomerHeader() {
               to="/dashboard"
               className="flex-shrink-0 flex items-center"
             >
-              <span className="text-2xl font-bold text-[#3B82F6]">WorkerConnect</span>
+              <span className="text-2xl font-bold text-[#CC7357]">WorkerConnect</span>
             </Link>
           </div>
 
@@ -123,32 +132,32 @@ export function CustomerHeader() {
           <nav className="hidden md:flex items-center space-x-8">
             <Link
               to="/dashboard"
-              className={`text-gray-700 hover:text-[#3B82F6] ${
-                location.pathname === "/dashboard" ? "text-[#3B82F6]" : ""
+              className={`text-gray-700 hover:text-[#CC7357] ${
+                location.pathname === "/dashboard" ? "text-[#CC7357]" : ""
               }`}
             >
               Dashboard
             </Link>
             <Link
               to="/search"
-              className={`text-gray-700 hover:text-[#3B82F6] ${
-                location.pathname === "/search" ? "text-[#3B82F6]" : ""
+              className={`text-gray-700 hover:text-[#CC7357] ${
+                location.pathname === "/search" ? "text-[#CC7357]" : ""
               }`}
             >
               Find Workers
             </Link>
             <Link
               to="/jobs/post"
-              className={`text-gray-700 hover:text-[#3B82F6] ${
-                location.pathname === "/jobs/post" ? "text-[#3B82F6]" : ""
+              className={`text-gray-700 hover:text-[#CC7357] ${
+                location.pathname === "/jobs/post" ? "text-[#CC7357]" : ""
               }`}
             >
               Post a Job
             </Link>
             <Link
               to="/messages"
-              className={`text-gray-700 hover:text-[#3B82F6] ${
-                location.pathname === "/messages" ? "text-[#3B82F6]" : ""
+              className={`text-gray-700 hover:text-[#CC7357] ${
+                location.pathname === "/messages" ? "text-[#CC7357]" : ""
               }`}
             >
               Messages
@@ -160,7 +169,7 @@ export function CustomerHeader() {
             {user ? (
               <>
                 <div className="relative">
-                  <Link to="/notifications" className="text-gray-700 hover:text-[#3B82F6]">
+                  <Link to="/notifications" className="text-gray-700 hover:text-[#CC7357]">
                     <Bell className="h-6 w-6" />
                     {notifications.length > 0 && (
                       <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
@@ -171,13 +180,16 @@ export function CustomerHeader() {
                 </div>
                 <Link
                   to="/jobs/post"
-                  className="bg-[#3B82F6] text-white px-4 py-2 rounded-md hover:bg-[#2563EB] flex items-center"
+                  className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347] flex items-center"
                 >
                   <PlusCircle className="h-4 w-4 mr-1" />
                   <span>Post Job</span>
                 </Link>
-                <div className="relative group">
-                  <Link to="/profile" className="flex items-center space-x-2">
+                <div className="relative">
+                  <button
+                    onClick={() => setIsMenuOpen(prev => ({ ...prev, profile: !prev.profile }))}
+                    className="flex items-center space-x-2 focus:outline-none"
+                  >
                     <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center overflow-hidden">
                       {user.user_metadata?.avatar_url ? (
                         <img
@@ -192,8 +204,9 @@ export function CustomerHeader() {
                     <span className="text-gray-700">
                       {profile?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || "Customer"}
                     </span>
-                  </Link>
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 hidden group-hover:block border border-gray-200">
+                  </button>
+                  {isMenuOpen.profile && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50 border border-gray-200">
                     <Link
                       to="/profile"
                       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -218,20 +231,21 @@ export function CustomerHeader() {
                     >
                       Sign Out
                     </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
               <>
                 <Link
                   to="/login"
-                  className="text-gray-700 hover:text-[#3B82F6]"
+                  className="text-gray-700 hover:text-[#CC7357]"
                 >
                   Log In
                 </Link>
                 <Link
                   to="/signup"
-                  className="bg-[#3B82F6] text-white px-4 py-2 rounded-md hover:bg-[#2563EB]"
+                  className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347]"
                 >
                   Sign Up
                 </Link>
@@ -242,10 +256,10 @@ export function CustomerHeader() {
           {/* Mobile menu button */}
           <div className="flex items-center md:hidden">
             <button
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="inline-flex items-center justify-center p-2 rounded-md text-gray-700 hover:text-[#3B82F6] hover:bg-gray-100 focus:outline-none"
+              onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: !prev.mobile }))}
+              className="inline-flex items-center justify-center p-2 rounded-md text-gray-700 hover:text-[#CC7357] hover:bg-gray-100 focus:outline-none"
             >
-              {isMenuOpen ? (
+              {isMenuOpen.mobile ? (
                 <X className="h-6 w-6" />
               ) : (
                 <Menu className="h-6 w-6" />
@@ -256,34 +270,34 @@ export function CustomerHeader() {
       </div>
 
       {/* Mobile menu */}
-      {isMenuOpen && (
+      {isMenuOpen.mobile && (
         <div className="md:hidden">
           <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
             <Link
               to="/dashboard"
               className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              onClick={() => setIsMenuOpen(false)}
+              onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
             >
               Dashboard
             </Link>
             <Link
               to="/search"
               className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              onClick={() => setIsMenuOpen(false)}
+              onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
             >
               Find Workers
             </Link>
             <Link
               to="/jobs/post"
               className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              onClick={() => setIsMenuOpen(false)}
+              onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
             >
               Post a Job
             </Link>
             <Link
               to="/messages"
               className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-              onClick={() => setIsMenuOpen(false)}
+              onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
             >
               Messages
             </Link>
@@ -294,28 +308,28 @@ export function CustomerHeader() {
                 <Link
                   to="/profile"
                   className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
                 >
                   Profile Settings
                 </Link>
                 <Link
                   to="/jobs"
                   className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
                 >
                   My Jobs
                 </Link>
                 <Link
                   to="/payments"
                   className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
                 >
                   Payment Methods
                 </Link>
                 <button
                   onClick={() => {
                     handleSignOut();
-                    setIsMenuOpen(false);
+                    setIsMenuOpen(prev => ({ ...prev, mobile: false }));
                   }}
                   className="block w-full text-left px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
                 >
@@ -327,14 +341,14 @@ export function CustomerHeader() {
                 <Link
                   to="/login"
                   className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
                 >
                   Log In
                 </Link>
                 <Link
                   to="/signup"
                   className="block px-3 py-2 rounded-md text-gray-700 hover:bg-gray-100"
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setIsMenuOpen(prev => ({ ...prev, mobile: false }))}
                 >
                   Sign Up
                 </Link>

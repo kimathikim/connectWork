@@ -14,9 +14,9 @@ import {
   Briefcase,
   ChevronLeft,
   Send,
+  Star,
 } from "lucide-react"
-import { supabase } from "../lib/supabase"
-import { applyForJob } from "../lib/supabase"
+import { supabase, getJobDetails, applyForJob } from "../lib/supabase"
 import { StartConversationButton } from "../components/StartConversationButton";
 
 interface Job {
@@ -86,17 +86,8 @@ function JobDetailsPage() {
         return
       }
 
-      // Update the query to select only fields that exist
-      const { data, error: fetchError } = await supabase
-        .from("jobs")
-        .select(`
-          *,
-          customer:profiles(id, full_name)
-        `)
-        .eq("id", jobId)
-        .single()
-
-      if (fetchError) throw fetchError
+      // Use the new getJobDetails function
+      const data = await getJobDetails(jobId)
 
       // Add default values for missing fields
       setJob({
@@ -364,6 +355,50 @@ function JobDetailsPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Assigned Worker (if any) */}
+              {job.assigned_worker && job.assigned_worker.profile && (
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="font-medium text-gray-900 mb-3">Assigned Worker</h3>
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full overflow-hidden bg-gray-200">
+                      {job.assigned_worker.profile.avatar_url ? (
+                        <img
+                          src={job.assigned_worker.profile.avatar_url}
+                          alt={job.assigned_worker.profile.full_name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <User className="h-full w-full p-2 text-gray-400" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-medium">{job.assigned_worker.profile.full_name}</p>
+                      <div className="flex items-center">
+                        <Star className="h-3 w-3 text-yellow-400 fill-current" />
+                        <span className="text-xs text-gray-500 ml-1">
+                          {job.assigned_worker.avg_rating ? job.assigned_worker.avg_rating.toFixed(1) : "0"} Rating
+                        </span>
+                      </div>
+                      <Link to={`/worker-profile/${job.assigned_worker.id}`} className="text-xs text-[#CC7357]">
+                        View Profile
+                      </Link>
+                    </div>
+                  </div>
+
+                  {job.status === "in_progress" && (
+                    <div className="mt-3">
+                      <Link
+                        to={`/messages?user=${job.assigned_worker.profile.id}`}
+                        className="flex items-center text-[#CC7357] text-sm hover:underline"
+                      >
+                        <MessageSquare className="h-4 w-4 mr-1" />
+                        Message Worker
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

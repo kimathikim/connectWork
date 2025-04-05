@@ -13,28 +13,102 @@ import {
   Edit,
   MapPin,
 } from "lucide-react"
-import { supabase } from "../lib/supabase"
+import { supabase, getCustomerAppointments } from "../lib/supabase"
 import { checkUserAuth } from '../lib/auth-helpers';
 import { StartConversationButton } from "../components/StartConversationButton";
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useToast } from "../components/ui/toast";
 
 function DashboardPage() {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
+  const { addToast } = useToast()
+  const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<any>(null)
+  const currentUser = user // Store current user for comparison
   const [profile, setProfile] = useState<any>(null)
-  const [jobs, setJobs] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState<"active" | "completed" | "all">("active")
   const [filteredJobs, setFilteredJobs] = useState<any[]>([])
+  const [filteredAppointments, setFilteredAppointments] = useState<any[]>([])
   const [stats, setStats] = useState({
     activeJobs: 0,
     completedJobs: 0,
     totalSpent: 0,
   })
 
+  // Use React Query to fetch jobs asynchronously
+  const {
+    data: jobs = [],
+    isLoading: isJobsLoading,
+    error: jobsError,
+    refetch: refetchJobs
+  } = useQuery({
+    queryKey: ['customerJobs', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      try {
+        const { data, error } = await supabase
+          .from("jobs")
+          .select(`
+            *,
+            service:services(*),
+            applications:job_applications(
+              *,
+              worker:worker_profiles(
+                *,
+                profile:profiles!worker_profiles_id_fkey(*)
+              )
+            ),
+            assigned_worker:worker_profiles!jobs_assigned_worker_id_fkey(
+              *,
+              profile:profiles!worker_profiles_id_fkey(*)
+            ),
+            payments:payments(*),
+            reviews:reviews(*)
+          `)
+          .eq("customer_id", user.id)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+        return data || [];
+      } catch (error) {
+        console.error("Error loading jobs:", error);
+        throw error;
+      }
+    },
+    enabled: !!user?.id,
+    staleTime: 60000, // 1 minute
+    refetchOnWindowFocus: false
+  });
+
+  // Use React Query to fetch appointments asynchronously
+  const {
+    data: appointments = [],
+    isLoading: isAppointmentsLoading,
+    error: appointmentsError,
+    refetch: refetchAppointments
+  } = useQuery({
+    queryKey: ['customerAppointments', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      try {
+        return await getCustomerAppointments(user.id);
+      } catch (error) {
+        console.error("Error loading appointments:", error);
+        throw error;
+      }
+    },
+    enabled: !!user?.id,
+    staleTime: 60000, // 1 minute
+    refetchOnWindowFocus: false
+  });
+
+  // Initialize page and authenticate user
   useEffect(() => {
+    // Only run once on component mount
     initializePage();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array to run only once
 
   const initializePage = async () => {
     try {
@@ -48,48 +122,75 @@ function DashboardPage() {
 
       if (!authenticated || !authorized) return;
 
-      setUser(user);
-
-      // Load customer data
-      await loadJobs(user.id);
-
+      // Only set user if it's different from current user
+      if (JSON.stringify(user) !== JSON.stringify(currentUser)) {
+        setUser(user);
+      }
       setLoading(false);
     } catch (error) {
       console.error('Error loading dashboard:', error);
+      addToast('Error loading dashboard. Please try again.', 'error');
       setLoading(false);
     }
   };
 
-  const loadJobs = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from("jobs")
-        .select(`
-          *,
-          service:services(*),
-          applications:job_applications(
-            *,
-            worker:worker_profiles(
-              *,
-              profile:profiles!worker_profiles_id_fkey(*)
-            )
-          ),
-          payments:payments(*),
-          reviews:reviews(*)
-        `)
-        .eq("customer_id", userId)
-        .order("created_at", { ascending: false })
+  // Show error toasts when queries fail
+  useEffect(() => {
+    if (jobsError) {
+      console.error('Error loading jobs:', jobsError);
+      addToast('Failed to load your jobs. Please try again.', 'error');
+    }
+  }, [jobsError, addToast]);
 
-      if (error) throw error
+  useEffect(() => {
+    if (appointmentsError) {
+      console.error('Error loading appointments:', appointmentsError);
+      addToast('Failed to load your appointments. Please try again.', 'error');
+    }
+  }, [appointmentsError, addToast]);
 
-      setJobs(data || [])
+  // Removed memoized filter functions as they're now directly implemented in the useEffect
 
+  // Filter jobs and appointments when data or tab changes
+  useEffect(() => {
+    if (jobs.length > 0) {
+      // Filter jobs directly here instead of calling the function
+      let filtered = [...jobs];
+
+      if (activeTab === "active") {
+        filtered = jobs.filter((job: { status: string }) => job.status !== "completed");
+      } else if (activeTab === "completed") {
+        filtered = jobs.filter((job: { status: string }) => job.status === "completed");
+      }
+
+      setFilteredJobs(filtered);
+    }
+
+    if (appointments.length > 0) {
+      // Filter appointments directly here instead of calling the function
+      let filtered = [...appointments];
+
+      if (activeTab === "active") {
+        filtered = appointments.filter((appointment: { status: string }) =>
+          appointment.status !== "completed" && appointment.status !== "cancelled");
+      } else if (activeTab === "completed") {
+        filtered = appointments.filter((appointment: { status: string }) =>
+          appointment.status === "completed");
+      }
+
+      setFilteredAppointments(filtered);
+    }
+  }, [jobs, appointments, activeTab])
+
+  // Calculate stats when jobs data changes
+  useEffect(() => {
+    if (jobs.length > 0) {
       // Calculate stats
-      const activeJobs = data.filter((job) => job.status !== "completed").length
-      const completedJobs = data.filter((job) => job.status === "completed").length
+      const activeJobs = jobs.filter((job) => job.status !== "completed").length
+      const completedJobs = jobs.filter((job) => job.status === "completed").length
 
       // Calculate total spent
-      const totalSpent = data.reduce((sum, job) => {
+      const totalSpent = jobs.reduce((sum, job) => {
         const payment = job.payments && job.payments[0]
         return sum + (payment ? payment.amount : 0)
       }, 0)
@@ -99,26 +200,8 @@ function DashboardPage() {
         completedJobs,
         totalSpent,
       })
-    } catch (error) {
-      console.error("Error loading jobs:", error)
     }
-  }
-
-  const filterJobs = () => {
-    let filtered = [...jobs]
-
-    if (activeTab === "active") {
-      filtered = jobs.filter((job: { status: string }) => job.status !== "completed")
-    } else if (activeTab === "completed") {
-      filtered = jobs.filter((job: { status: string }) => job.status === "completed")
-    }
-
-    setFilteredJobs(filtered)
-  }
-
-  useEffect(() => {
-    filterJobs()
-  }, [jobs, activeTab])
+  }, [jobs])
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
@@ -149,12 +232,28 @@ function DashboardPage() {
   }
 
   const getAcceptedWorker = (job: any) => {
-    if (!job.applications) return null
+    // First check if there's an assigned worker directly on the job using assigned_worker_id
+    if (job.assigned_worker_id && job.assigned_worker && job.assigned_worker.profile) {
+      return {
+        id: job.assigned_worker_id,
+        ...job.assigned_worker,
+        profile: job.assigned_worker.profile,
+        rating: job.assigned_worker.avg_rating,
+        review_count: 0 // This could be added to the worker_profiles table
+      };
+    }
 
-    const acceptedApplication = job.applications.find((app: any) => app.status === "accepted")
-    if (!acceptedApplication) return null
+    // Fallback to checking applications
+    if (!job.applications) return null;
 
-    return acceptedApplication.worker
+    const acceptedApplication = job.applications.find((app: any) => app.status === "accepted");
+    if (!acceptedApplication || !acceptedApplication.worker) return null;
+
+    return {
+      id: acceptedApplication.worker_id,
+      ...acceptedApplication.worker,
+      profile: acceptedApplication.worker.profile
+    };
   }
 
   const needsReview = (job: any) => {
@@ -266,7 +365,24 @@ function DashboardPage() {
               </div>
 
               <div className="divide-y divide-gray-200">
-                {filteredJobs.length === 0 ? (
+                {isJobsLoading ? (
+                  <div className="p-6 text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#CC7357] mx-auto mb-4"></div>
+                    <p className="text-gray-500">Loading your jobs...</p>
+                  </div>
+                ) : jobsError ? (
+                  <div className="p-6 text-center">
+                    <div className="text-red-500 text-xl mb-2">⚠️</div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Error loading jobs</h3>
+                    <p className="text-gray-500 mb-4">We couldn't load your jobs. Please try again.</p>
+                    <button
+                      onClick={() => refetchJobs()}
+                      className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : filteredJobs.length === 0 ? (
                   <div className="p-6 text-center">
                     <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                     <h3 className="text-lg font-medium text-gray-900 mb-2">No jobs found</h3>
@@ -294,6 +410,8 @@ function DashboardPage() {
                     budget_max: number;
                     service?: { name: string };
                     applications?: any[];
+                    assigned_worker_id?: string;
+                    assigned_worker?: any;
                     reviewed?: boolean;
                   }) => {
                     const acceptedWorker = getAcceptedWorker(job)
@@ -398,7 +516,7 @@ function DashboardPage() {
                                 to={`/payment`}
                                 state={{
                                   jobId: job.id,
-                                  workerId: acceptedWorker?.id,
+                                  workerId: job.assigned_worker_id || acceptedWorker?.id,
                                   // Use the price from the accepted application instead of budget_min
                                   amount: job.applications?.find((app: any) => app.status === "accepted")?.price || job.budget_min,
                                   jobTitle: job.title,
@@ -406,10 +524,17 @@ function DashboardPage() {
                                 }}
                                 className="border border-green-500 text-green-600 px-4 py-2 rounded-md hover:bg-green-50 transition-colors text-center"
                                 onClick={(e) => {
-                                  // Prevent navigation if no accepted worker
+                                  // Prevent navigation if no assigned worker
+                                  if (!job.assigned_worker_id) {
+                                    e.preventDefault();
+                                    alert("No worker has been assigned to this job yet.");
+                                    return;
+                                  }
+
+                                  // Double-check that we have the worker information
                                   if (!acceptedWorker) {
                                     e.preventDefault();
-                                    alert("No worker has been accepted for this job yet.");
+                                    alert("Worker information is missing. Please refresh the page and try again.");
                                   }
                                 }}
                               >
@@ -439,6 +564,102 @@ function DashboardPage() {
                       </div>
                     )
                   })
+                )}
+              </div>
+            </div>
+
+            {/* Appointments */}
+            <div className="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+              <div className="p-6 border-b border-gray-200">
+                <h2 className="text-lg font-bold text-gray-900">Your Appointments</h2>
+              </div>
+              <div className="divide-y divide-gray-200">
+                {filteredAppointments.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No appointments found</h3>
+                    <p className="text-gray-500 mb-6">
+                      {activeTab === "active"
+                        ? "You don't have any upcoming appointments."
+                        : activeTab === "completed"
+                          ? "You don't have any completed appointments yet."
+                          : "You haven't scheduled any appointments yet."}
+                    </p>
+                    <Link
+                      to="/search"
+                      className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors"
+                    >
+                      Find Workers
+                    </Link>
+                  </div>
+                ) : (
+                  filteredAppointments.map((appointment: any) => (
+                    <div key={appointment.id} className="p-6 hover:bg-gray-50">
+                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-bold text-gray-900">{appointment.title || 'Appointment'}</h3>
+                            {getStatusBadge(appointment.status)}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2">
+                            <div className="flex items-center text-gray-500 text-sm">
+                              <Calendar className="h-4 w-4 mr-1" />
+                              <span>{formatDate(appointment.appointment_date)}</span>
+                            </div>
+
+                            <div className="flex items-center text-gray-500 text-sm">
+                              <Clock className="h-4 w-4 mr-1" />
+                              <span>{appointment.start_time} - {appointment.end_time}</span>
+                            </div>
+
+                            {appointment.worker && (
+                              <div className="flex items-center text-gray-500 text-sm">
+                                <User className="h-4 w-4 mr-1" />
+                                <span>Worker: {appointment.worker.profile?.full_name || 'Worker'}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {appointment.notes && (
+                            <p className="mt-2 text-gray-600">{appointment.notes}</p>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <Link
+                            to={`/appointments/${appointment.id}`}
+                            className="bg-[#CC7357] text-white px-4 py-2 rounded-md hover:bg-[#B66347] transition-colors text-center"
+                          >
+                            View Details
+                          </Link>
+
+                          {appointment.worker && (
+                            <Link
+                              to={`/messages?user=${appointment.worker.id}`}
+                              className="border border-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-50 transition-colors text-center"
+                            >
+                              Message Worker
+                            </Link>
+                          )}
+
+                          {appointment.status === 'scheduled' && (
+                            <button
+                              className="border border-red-500 text-red-600 px-4 py-2 rounded-md hover:bg-red-50 transition-colors"
+                              onClick={() => {
+                                if (confirm('Are you sure you want to cancel this appointment?')) {
+                                  // TODO: Implement cancel appointment functionality
+                                  alert('Appointment cancellation will be implemented soon.');
+                                }
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>

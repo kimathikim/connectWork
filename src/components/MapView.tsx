@@ -3,14 +3,21 @@ import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+interface WorkerProfile {
+  full_name: string;
+  location?: string;
+  // Support different location field names
+  latitude?: number;
+  longitude?: number;
+  lat?: number;
+  lng?: number;
+  location_lat?: number;
+  location_lng?: number;
+}
+
 interface Worker {
   id: string;
-  profile: {
-    full_name: string;
-    location: string;
-    latitude: number;
-    longitude: number;
-  };
+  profile: WorkerProfile;
   headline?: string;
   hourly_rate: number;
   avg_rating: number;
@@ -69,11 +76,21 @@ const MapView: React.FC<MapViewProps> = ({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
 
-      {workers.map(worker => (
-        worker.profile.latitude && worker.profile.longitude ? (
+      {workers.map(worker => {
+        // Check if profile exists
+        if (!worker.profile) {
+          return null;
+        }
+
+        // Get coordinates from any available location field
+        const lat = worker.profile.latitude || worker.profile.lat || worker.profile.location_lat;
+        const lng = worker.profile.longitude || worker.profile.lng || worker.profile.location_lng;
+
+        // Only render marker if we have valid coordinates
+        return lat && lng ? (
           <Marker
             key={worker.id}
-            position={[worker.profile.latitude, worker.profile.longitude]}
+            position={[lat, lng]}
             icon={createWorkerIcon(worker.avg_rating)}
             eventHandlers={{
               click: () => {
@@ -99,8 +116,8 @@ const MapView: React.FC<MapViewProps> = ({
               </div>
             </Popup>
           </Marker>
-        ) : null
-      ))}
+        ) : null;
+      })}
     </MapContainer>
   );
 };

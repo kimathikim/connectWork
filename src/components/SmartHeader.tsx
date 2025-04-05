@@ -49,7 +49,7 @@ export function SmartHeader() {
   // Show loading state or render appropriate header
   if (loading) {
     return (
-      <header className="bg-white shadow-sm">
+      <header className="bg-white shadow-sm fixed top-0 left-0 right-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <div className="animate-pulse bg-gray-200 h-8 w-40 rounded"></div>

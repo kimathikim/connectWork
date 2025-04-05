@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-env --watch index.ts"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window", "dom"],
+    "strict": true,
+    "types": ["https://deno.land/x/supabase@1.8.1/mod.ts"]
+  }
+}

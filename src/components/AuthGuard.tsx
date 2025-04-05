@@ -34,7 +34,8 @@ function AuthGuard({ children, requiredUserType = null }: AuthGuardProps) {
     return () => {
       subscription.unsubscribe()
     }
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty dependency array is correct here as we only want to run this once
 
   const checkAuth = async () => {
     try {

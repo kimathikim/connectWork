@@ -2,7 +2,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import React from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import { Star, MapPin, Clock, Briefcase, MessageSquare, ChevronLeft, User, Calendar, Shield, Award } from "lucide-react"
 import { supabase } from "../lib/supabase"
@@ -388,11 +387,11 @@ function WorkerProfilePage() {
                     </h3>
 
                     <ul className="space-y-2">
-                      <li className="flex items-center text-gray-700">
+                      <li key="cert-1" className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
                         Professional {worker.headline} Certification
                       </li>
-                      <li className="flex items-center text-gray-700">
+                      <li key="cert-2" className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
                         Safety Training Certification
                       </li>
@@ -406,15 +405,15 @@ function WorkerProfilePage() {
                     </h3>
 
                     <ul className="space-y-2">
-                      <li className="flex items-center text-gray-700">
+                      <li key="verify-1" className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
                         Identity Verified
                       </li>
-                      <li className="flex items-center text-gray-700">
+                      <li key="verify-2" className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
                         Phone Verified
                       </li>
-                      <li className="flex items-center text-gray-700">
+                      <li key="verify-3" className="flex items-center text-gray-700">
                         <span className="h-2 w-2 bg-[#CC7357] rounded-full mr-2"></span>
                         Email Verified
                       </li>

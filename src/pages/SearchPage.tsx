@@ -4,9 +4,11 @@ import React from "react"
 import { useState, useEffect } from "react"
 import { Link } from "react-router-dom"
 import { Search as SearchIcon, MapPin, Filter, Star, ChevronDown, X, DollarSign, Clock } from "lucide-react"
-import { supabase } from "../lib/supabase"
+import { supabase, searchWorkers, getServices } from "../lib/supabase"
 import { SearchButton } from "../components/SearchButton"
 import { useToast } from "../components/ui/toast"
+import { useCachedData } from "../hooks/useCachedData"
+import { CACHE_KEYS } from "../lib/cache-utils"
 
 function SearchPage() {
   const [loading, setLoading] = useState(true)
@@ -28,34 +30,26 @@ function SearchPage() {
   const [sortBy, setSortBy] = useState<"hourly_rate" | "years_experience" | "avg_rating">("avg_rating")
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc")
 
-  useEffect(() => {
-    loadServices()
-    loadWorkers()
-  }, [])
+  // Use cached data for services
+  const {
+    data: servicesData,
+    loading: servicesLoading,
+    error: servicesError
+  } = useCachedData(
+    CACHE_KEYS.SERVICES,
+    getServices,
+    { expiry: 24 * 60 * 60 * 1000 } // Cache for 24 hours
+  );
 
-  useEffect(() => {
-    filterWorkers()
-  }, [workers, searchQuery, location, selectedServices, minRate, maxRate, minRating, sortBy, sortOrder])
-
-  const loadServices = async () => {
-    try {
-      const { data, error } = await supabase.from("services").select("*").order("name")
-
-      if (error) throw error
-
-      setServices(data || [])
-    } catch (error) {
-      console.error("Error loading services:", error)
-      setError("Failed to load services. Please try again later.")
-      addToast("Failed to load services", "error")
-    }
-  }
-
-  const loadWorkers = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
+  // Use cached data for workers
+  const {
+    data: workersData,
+    loading: workersLoading,
+    error: workersError,
+    refetch: refetchWorkers
+  } = useCachedData(
+    `${CACHE_KEYS.WORKER_PROFILES}_all`,
+    async () => {
       const { data, error } = await supabase
         .from("worker_profiles")
         .select(`
@@ -66,28 +60,55 @@ function SearchPage() {
             service:services(*)
           )
         `)
-        .order("avg_rating", { ascending: false })
+        .order("avg_rating", { ascending: false });
 
-      if (error) throw error
+      if (error) throw error;
+      return data || [];
+    },
+    { expiry: 30 * 60 * 1000 } // Cache for 30 minutes
+  );
 
-      setWorkers(data || [])
-      setFilteredWorkers(data || [])
-
-      if (data && data.length > 0) {
-        addToast(`Loaded ${data.length} workers successfully`, "success")
-      }
-    } catch (error: any) {
-      console.error("Error loading workers:", error)
-      setError(error.message || "Failed to load workers. Please try again later.")
-      addToast("Failed to load workers", "error")
-      setWorkers([])
-      setFilteredWorkers([])
-    } finally {
-      setLoading(false)
+  // Update state when cached data is loaded
+  useEffect(() => {
+    if (servicesData) {
+      setServices(servicesData);
     }
-  }
+    if (servicesError) {
+      console.error("Error loading services:", servicesError);
+      setError("Failed to load services. Please try again later.");
+      addToast("Failed to load services", "error");
+    }
+  }, [servicesData, servicesError, addToast]);
 
-  const filterWorkers = () => {
+  // Update workers data when it changes
+  useEffect(() => {
+    if (workersData) {
+      setWorkers(workersData);
+      setLoading(false);
+
+      // Only show toast on initial load, not on every filter change
+      if (workersData.length > 0 && !workers.length) {
+        addToast(`Loaded ${workersData.length} workers successfully`, "success");
+      }
+    }
+    if (workersError) {
+      console.error("Error loading workers:", workersError);
+      setError(workersError.message || "Failed to load workers. Please try again later.");
+      addToast("Failed to load workers", "error");
+      setWorkers([]);
+      setLoading(false);
+    }
+  }, [workersData, workersError, addToast, workers.length]);
+
+  // Filter workers when filter criteria change
+  useEffect(() => {
+    if (workers.length > 0) {
+      const filtered = getFilteredWorkers();
+      setFilteredWorkers(filtered);
+    }
+  }, [searchQuery, location, selectedServices, minRate, maxRate, minRating, sortBy, sortOrder, workers])
+
+  const getFilteredWorkers = () => {
     let filtered = [...workers]
 
     // Filter by search query (name or profession)
@@ -144,7 +165,13 @@ function SearchPage() {
       }
     })
 
-    setFilteredWorkers(filtered)
+    return filtered;
+  }
+
+  // Keep the filterWorkers function for backward compatibility
+  const filterWorkers = () => {
+    const filtered = getFilteredWorkers();
+    setFilteredWorkers(filtered);
   }
 
   const handleSearch = (e?: React.FormEvent) => {
@@ -373,7 +400,7 @@ function SearchPage() {
               <button
                 onClick={() => {
                   setError(null)
-                  loadWorkers()
+                  refetchWorkers()
                 }}
                 className="bg-[#CC7357] text-white px-6 py-2 rounded-md hover:bg-[#B66347] transition-colors"
               >

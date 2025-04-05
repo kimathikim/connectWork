@@ -1,14 +1,11 @@
 "use client"
 
 
-import React from "react"
-
 import { useState, useEffect } from "react"
 import { useParams, Link, useNavigate } from "react-router-dom"
 import {
   Briefcase,
   Star,
-  DollarSign,
   Clock,
   CheckCircle,
   X,
@@ -17,7 +14,7 @@ import {
   AlertCircle,
   MapPin,
 } from "lucide-react"
-import { supabase } from "../lib/supabase"
+import { supabase, acceptJobApplication, testConnection } from "../lib/supabase"
 
 function JobApplicationsPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -116,66 +113,222 @@ function JobApplicationsPage() {
       setProcessingAction(applicationId)
       setError(null)
 
-      // Get the application to find the worker
-      const { data: application, error: applicationError } = await supabase
-        .from("job_applications")
-        .select("worker_id")
-        .eq("id", applicationId)
-        .single()
-
-      if (applicationError) {
-        setError("Failed to get application details: " + applicationError.message)
+      if (!jobId) {
+        setError("Job ID is missing")
         return
       }
 
-      // Start a transaction by using multiple operations
-      // Update the application status to accepted
-      const { error: updateError } = await supabase
-        .from("job_applications")
-        .update({ status: "accepted" })
-        .eq("id", applicationId)
-
-      if (updateError) {
-        setError("Failed to accept application: " + updateError.message)
+      if (!applicationId) {
+        setError("Application ID is missing")
         return
       }
 
-      // Update the job status to in_progress and assign the worker
-      const { error: jobUpdateError } = await supabase
-        .from("jobs")
-        .update({
-          status: "in_progress",
-          assigned_worker_id: application.worker_id
-        })
-        .eq("id", jobId)
-
-      if (jobUpdateError) {
-        setError("Failed to update job status: " + jobUpdateError.message)
-        // Try to revert the previous change
-        await supabase.from("job_applications").update({ status: "pending" }).eq("id", applicationId)
-        return
+      // Test database connection first
+      try {
+        await testConnection();
+      } catch (connError: any) {
+        console.error('Database connection error:', connError);
+        setError(`Database connection error: ${connError.message || 'Could not connect to database'}`);
+        return;
       }
 
-      // Reject all other applications
-      const { error: rejectError } = await supabase
-        .from("job_applications")
-        .update({ status: "rejected" })
-        .eq("job_id", jobId)
-        .neq("id", applicationId)
+      console.log(`Accepting application ${applicationId} for job ${jobId}`);
 
-      if (rejectError) {
-        console.error("Error rejecting other applications:", rejectError)
-        // Continue anyway as this is not critical
-      }
+      // Use the centralized function to accept the job application
+      const result = await acceptJobApplication(applicationId, jobId)
+
+      console.log('Accept application result:', result);
 
       // Reload the job and applications
       await loadJobAndApplications()
 
+      // Verify the application status was updated
+      const verifyApplication = applications.find(app => app.id === applicationId);
+      if (verifyApplication && verifyApplication.status !== 'accepted') {
+        console.warn('Application status may not have been updated correctly:', verifyApplication);
+
+        // Check directly in the database
+        const { data: dbApplication, error: dbError } = await supabase
+          .from('job_applications')
+          .select('status')
+          .eq('id', applicationId)
+          .single();
+
+        if (dbError) {
+          console.error('Error verifying application status in database:', dbError);
+        } else if (dbApplication && dbApplication.status !== 'accepted') {
+          console.error('Application status is not accepted in the database:', dbApplication);
+
+          // Try to update it directly
+          const { error: updateError } = await supabase
+            .from('job_applications')
+            .update({ status: 'accepted', updated_at: new Date().toISOString() })
+            .eq('id', applicationId);
+
+          if (updateError) {
+            console.error('Error updating application status directly:', updateError);
+          } else {
+            console.log('Successfully updated application status directly');
+          }
+        } else {
+          console.log('Application status is accepted in the database, but not in local state');
+        }
+
+        // Try to refresh the data one more time
+        await loadJobAndApplications();
+
+        // Check again after refresh
+        const refreshedApplication = applications.find(app => app.id === applicationId);
+        if (refreshedApplication && refreshedApplication.status !== 'accepted') {
+          console.error('Application status still not updated after refresh');
+          setError('The application was accepted, but there was an issue updating its status. Please refresh the page.');
+          return;
+        }
+      }
+
       // Show success message
       alert("Application accepted successfully! The job has been assigned to the worker.")
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error accepting application:", err)
-      setError("An unexpected error occurred. Please try again.")
+
+      // Provide a more user-friendly error message
+      let errorMessage = "An unexpected error occurred. Please try again.";
+
+      if (err.message) {
+        if (err.message.includes("Application not found")) {
+          errorMessage = "This application no longer exists. It may have been deleted or already processed.";
+        } else if (err.message.includes("Job not found")) {
+          errorMessage = "This job no longer exists. It may have been deleted.";
+        } else if (err.message.includes("Failed to assign worker")) {
+          errorMessage = "Could not assign the worker to this job. The job may already be assigned.";
+        } else if (err.message.includes("Application exists but could not be updated") ||
+                   err.message.includes("Failed to update application status")) {
+          errorMessage = "Could not update the application status. Trying alternative method...";
+
+          // Try a direct update as a fallback
+          try {
+            console.log('Attempting direct update as fallback...');
+
+            // First, check if the application exists and get its worker_id
+            const { data: application, error: appError } = await supabase
+              .from("job_applications")
+              .select("worker_id, status")
+              .eq("id", applicationId)
+              .single();
+
+            if (appError) {
+              console.error('Error fetching application:', appError);
+              throw new Error(`Failed to get application details: ${appError.message}`);
+            }
+
+            if (!application) {
+              console.error('Application not found with ID:', applicationId);
+              throw new Error('Application not found with the provided ID');
+            }
+
+            console.log('Current application state:', application);
+
+            // Check if the application is already accepted
+            if (application.status === 'accepted') {
+              console.log('Application is already accepted, just updating the job');
+            } else {
+              // Try multiple approaches to update the application
+
+              // Approach 1: Direct update
+              console.log('Approach 1: Direct update');
+              const { error: directUpdateError } = await supabase
+                .from("job_applications")
+                .update({
+                  status: "accepted",
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", applicationId);
+
+              if (directUpdateError) {
+                console.error('Direct update failed:', directUpdateError);
+
+                // Approach 2: RPC function
+                console.log('Approach 2: Using RPC function');
+                const { error: rpcError } = await supabase.rpc('update_application_status', {
+                  app_id: applicationId,
+                  new_status: 'accepted'
+                });
+
+                if (rpcError) {
+                  console.error('RPC update failed:', rpcError);
+                  throw new Error(`Failed to update application status: ${rpcError.message}`);
+                }
+              }
+
+              // Verify the update was successful
+              const { data: verifyApp } = await supabase
+                .from("job_applications")
+                .select("status")
+                .eq("id", applicationId)
+                .single();
+
+              console.log('Verification result:', verifyApp);
+
+              if (!verifyApp || verifyApp.status !== 'accepted') {
+                console.error('Application status still not updated after all attempts');
+                throw new Error('Failed to update application status after multiple attempts');
+              }
+            }
+
+            // Now update the job with the worker ID
+            if (application.worker_id) {
+              const { error: jobUpdateError } = await supabase
+                .from("jobs")
+                .update({
+                  assigned_worker_id: application.worker_id,
+                  status: "in_progress",
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", jobId);
+
+              if (jobUpdateError) {
+                console.error('Error updating job:', jobUpdateError);
+                throw new Error(`Failed to update job: ${jobUpdateError.message}`);
+              }
+
+              // Reject other applications
+              const { error: rejectError } = await supabase
+                .from("job_applications")
+                .update({
+                  status: "rejected",
+                  updated_at: new Date().toISOString()
+                })
+                .eq("job_id", jobId)
+                .neq("id", applicationId);
+
+              if (rejectError) {
+                console.error('Error rejecting other applications:', rejectError);
+                // Continue anyway as this is not critical
+              }
+
+              // Reload the job and applications
+              await loadJobAndApplications();
+
+              // Show success message
+              alert("Application accepted successfully using alternative method! The job has been assigned to the worker.");
+              return; // Exit the error handler since we've recovered
+            } else {
+              throw new Error('Worker ID is missing from the application');
+            }
+          } catch (fallbackErr) {
+            console.error('Fallback method failed:', fallbackErr);
+            errorMessage = "Could not update the application status even with alternative method. Please try again later.";
+          }
+        } else {
+          // Use the original error message but make it more user-friendly
+          errorMessage = err.message.replace("Failed to accept application: ", "");
+        }
+      }
+
+      setError(errorMessage)
+
+      // Reload the job and applications to ensure UI is in sync with database
+      await loadJobAndApplications()
     } finally {
       setProcessingAction(null)
     }
@@ -189,7 +342,10 @@ function JobApplicationsPage() {
       // Update the application status to rejected
       const { error: updateError } = await supabase
         .from("job_applications")
-        .update({ status: "rejected" })
+        .update({
+          status: "rejected",
+          updated_at: new Date().toISOString()
+        })
         .eq("id", applicationId)
 
       if (updateError) {

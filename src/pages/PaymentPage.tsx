@@ -3,8 +3,9 @@
 import React from "react"
 import { useState, useEffect } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
-import { CreditCard, Calendar, Lock, CheckCircle, AlertCircle } from "lucide-react"
+import { CreditCard, Calendar, Lock, CheckCircle, AlertCircle, Loader } from "lucide-react"
 import { supabase } from "../lib/supabase"
+import { processJobPayment, checkTransactionStatus } from "../lib/mpesa"
 
 interface LocationState {
   jobId?: string
@@ -19,7 +20,11 @@ function PaymentPage() {
   const location = useLocation()
   const { jobId, workerId, amount, jobTitle, workerName } = (location.state as LocationState) || {}
 
-  const [paymentMethod, setPaymentMethod] = useState<"card" | "paypal">("card")
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "paypal" | "mpesa">("card")
+  const [formattedWorkerPhone, setFormattedWorkerPhone] = useState("")
+  const [formattedCustomerPhone, setFormattedCustomerPhone] = useState("")
+  const [manualPhone, setManualPhone] = useState("")
+  const [manualCustomerPhone, setManualCustomerPhone] = useState("")
   const [cardDetails, setCardDetails] = useState({
     cardNumber: "",
     cardName: "",
@@ -29,6 +34,140 @@ function PaymentPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+  const [mpesaCheckoutId, setMpesaCheckoutId] = useState<string>("")
+  const [mpesaStatus, setMpesaStatus] = useState<"pending" | "completed" | "failed">("pending")
+  const [mpesaPolling, setMpesaPolling] = useState(false)
+
+  // Function to poll M-Pesa transaction status
+  const pollMpesaStatus = async (checkoutRequestId: string) => {
+    if (!checkoutRequestId) {
+      console.error('No checkout request ID provided for polling');
+      return false;
+    }
+
+    console.log(`Polling M-Pesa status for checkout ID: ${checkoutRequestId}`);
+
+    try {
+      setMpesaPolling(true);
+
+      // Check the transaction status
+      const response = await checkTransactionStatus(checkoutRequestId);
+      console.log('M-Pesa status response:', response);
+
+      if (response.success) {
+        // Log the full response for debugging
+        console.log('Full transaction status response:', response.data);
+
+        // Check if we have the necessary fields in the response
+        if (!response.data.CheckoutRequestID) {
+          console.warn('CheckoutRequestID is missing in the response');
+        }
+
+        // Handle different response formats
+        // Some M-Pesa responses might have different field names
+        const resultCode = response.data.ResultCode || response.data.errorCode || null;
+        const resultDesc = response.data.ResultDesc || response.data.errorMessage || 'No description provided';
+
+        if (resultCode === null) {
+          console.warn('ResultCode is missing in the response');
+          console.warn('Full response data:', response.data);
+          setError('Payment status check returned incomplete data. Please check your M-Pesa messages to confirm payment status.');
+          return false;
+        }
+
+        // Check the result code
+        if (resultCode === '0') {
+          // Payment successful
+          console.log('M-Pesa payment successful!');
+          setMpesaStatus('completed');
+          setSuccess(true);
+
+          // Update the job status
+          const { error: jobUpdateError } = await supabase
+            .from("jobs")
+            .update({ status: "completed", payment_status: "paid" })
+            .eq("id", jobId);
+
+          if (jobUpdateError) {
+            console.error('Error updating job status:', jobUpdateError);
+          } else {
+            console.log(`Job ${jobId} marked as completed and paid`);
+          }
+
+          // Stop polling
+          return true;
+        } else if (['1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008', '1009', '1010'].includes(resultCode)) {
+          // Payment is still pending, continue polling
+          console.log('M-Pesa payment still pending, continuing to poll...');
+          return false;
+        } else {
+          // Payment failed
+          console.error(`M-Pesa payment failed with code ${resultCode}: ${resultDesc}`);
+          setMpesaStatus('failed');
+          setError(`Payment failed: ${resultDesc} (Code: ${resultCode})`);
+
+          // Stop polling
+          return true;
+        }
+      } else {
+        // Error checking status
+        console.error('Error checking M-Pesa status:', response);
+        setError(`Error checking payment status: ${response.message || 'Unknown error'}`);
+        return false;
+      }
+    } catch (err: any) {
+      console.error('Exception polling M-Pesa status:', err);
+      setError(`Error checking payment status: ${err.message || 'Unknown error'}`);
+      return false;
+    } finally {
+      setMpesaPolling(false);
+    }
+  };
+
+  // Effect to start polling when a checkout ID is set
+  useEffect(() => {
+    if (!mpesaCheckoutId) {
+      console.log('No checkout ID set, not starting polling');
+      return;
+    }
+
+    console.log(`Starting polling for checkout ID: ${mpesaCheckoutId}`);
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    const pollInterval = 5000; // 5 seconds
+    let pollTimer: number | undefined;
+
+    const poll = async () => {
+      console.log(`Polling attempt ${attempts + 1}/${maxAttempts}`);
+      const done = await pollMpesaStatus(mpesaCheckoutId);
+      attempts++;
+
+      if (!done && attempts < maxAttempts) {
+        // Schedule next poll
+        console.log(`Scheduling next poll in ${pollInterval}ms`);
+        pollTimer = window.setTimeout(poll, pollInterval);
+      } else if (attempts >= maxAttempts) {
+        // Max attempts reached
+        console.warn(`Max polling attempts (${maxAttempts}) reached without completion`);
+        setError("Payment verification timed out. Please check your M-Pesa messages to confirm payment status.");
+      } else {
+        console.log('Polling completed successfully');
+      }
+    };
+
+    // Start polling
+    poll();
+
+    // Cleanup function
+    return () => {
+      console.log('Cleaning up polling effect');
+      if (pollTimer) {
+        window.clearTimeout(pollTimer);
+      }
+      attempts = maxAttempts; // Stop polling on unmount
+    };
+  }, [mpesaCheckoutId]);
 
   useEffect(() => {
     // Verify we have all required data
@@ -37,10 +176,127 @@ function PaymentPage() {
       return;
     }
 
-    // Verify this job has an accepted application for this worker
+    // Fetch phone numbers
+    const fetchPhoneNumbers = async () => {
+      try {
+        // Get current user
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (!user) {
+          console.error("No authenticated user found");
+          return;
+        }
+
+        // Get worker profile with phone number
+        const { data: workerData, error: workerError } = await supabase
+          .from("worker_profiles")
+          .select(`
+            *,
+            profile:profiles!worker_profiles_id_fkey(phone)
+          `)
+          .eq("id", workerId)
+          .single();
+
+        if (workerError || !workerData) {
+          console.error("Error fetching worker profile:", workerError);
+          return;
+        }
+
+        // Get customer profile with phone number
+        const { data: customerData, error: customerError } = await supabase
+          .from("profiles")
+          .select("phone")
+          .eq("id", user.id)
+          .single();
+
+        if (customerError || !customerData) {
+          console.error("Error fetching customer profile:", customerError);
+          return;
+        }
+
+        // Format worker phone number
+        const workerPhone = workerData.profile?.phone || "";
+        let formattedWorkerPhone = formatPhoneNumber(workerPhone);
+        setFormattedWorkerPhone(formattedWorkerPhone);
+
+        // Format customer phone number
+        const customerPhone = customerData.phone || "";
+        let formattedCustomerPhone = formatPhoneNumber(customerPhone);
+        setFormattedCustomerPhone(formattedCustomerPhone);
+
+        console.log(`Worker phone: ${formattedWorkerPhone}, Customer phone: ${formattedCustomerPhone}`);
+      } catch (err) {
+        console.error("Error fetching phone numbers:", err);
+      }
+    };
+
+    // Helper function to format phone numbers for M-Pesa
+    const formatPhoneNumber = (phone: string): string => {
+      // Remove non-digit characters
+      let formatted = phone.replace(/\D/g, "");
+
+      // Remove leading country code if present (e.g., 254, +254)
+      if (formatted.startsWith("254")) {
+        formatted = formatted.substring(3);
+      }
+
+      // Remove leading zero if present
+      if (formatted.startsWith("0")) {
+        formatted = formatted.substring(1);
+      }
+
+      // Ensure it starts with a 7 or 1 (Safaricom/Airtel format)
+      if (formatted.length >= 9 && (formatted.startsWith("7") || formatted.startsWith("1"))) {
+        console.log(`Phone formatted for M-Pesa: ${formatted}`);
+        return formatted;
+      } else {
+        console.warn(`Phone number is not in a valid M-Pesa format: ${formatted}`);
+        return "";
+      }
+    };
+
+    fetchPhoneNumbers();
+
+    // Verify this job has an accepted application for this worker and the worker is assigned to the job
     const verifyJobWorker = async () => {
       try {
-        const { data, error } = await supabase
+        console.log(`Verifying job ${jobId} and worker ${workerId}`);
+
+        // First check if the job has an assigned worker
+        const { data: jobData, error: jobError } = await supabase
+          .from("jobs")
+          .select("assigned_worker_id, status")
+          .eq("id", jobId)
+          .single();
+
+        if (jobError || !jobData) {
+          console.error("Job verification error:", jobError);
+          setError("Invalid payment request: Job not found");
+          return;
+        }
+
+        console.log(`Job data: assigned_worker_id=${jobData.assigned_worker_id}, status=${jobData.status}`);
+
+        // Explicitly check the assigned_worker_id field in the jobs table
+        if (!jobData.assigned_worker_id) {
+          setError("No worker has been assigned to this job yet");
+          return;
+        }
+
+        // Verify that the worker ID passed in the URL matches the assigned worker in the database
+        if (jobData.assigned_worker_id !== workerId) {
+          console.error(`Worker ID mismatch: Expected ${jobData.assigned_worker_id}, got ${workerId}`);
+          setError("Invalid payment request: Worker is not assigned to this job");
+          return;
+        }
+
+        if (jobData.status !== "in_progress") {
+          setError("This job is not in progress and cannot be paid for");
+          return;
+        }
+
+        // Also verify the job application status - first try to find an accepted application
+        const { data: acceptedApplication, error: acceptedAppError } = await supabase
           .from("job_applications")
           .select("*")
           .eq("job_id", jobId)
@@ -48,9 +304,44 @@ function PaymentPage() {
           .eq("status", "accepted")
           .single();
 
-        if (error || !data) {
-          setError("Invalid payment request: This worker is not assigned to this job");
+        if (acceptedAppError || !acceptedApplication) {
+          console.log("No accepted application found, checking if any application exists for this worker");
+
+          // If no accepted application is found, check if any application exists for this worker
+          const { data: anyApplication, error: anyAppError } = await supabase
+            .from("job_applications")
+            .select("*")
+            .eq("job_id", jobId)
+            .eq("worker_id", workerId)
+            .single();
+
+          if (anyAppError || !anyApplication) {
+            console.error("No application found for this worker:", anyAppError);
+            setError("Invalid payment request: No application found for this worker");
+            return;
+          }
+
+          // If an application exists but isn't accepted, try to update it to accepted
+          console.log(`Found application with status: ${anyApplication.status}, attempting to update to accepted`);
+
+          const { error: updateError } = await supabase
+            .from("job_applications")
+            .update({
+              status: "accepted",
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", anyApplication.id);
+
+          if (updateError) {
+            console.error("Failed to update application status:", updateError);
+            setError("Failed to update application status. Please try again.");
+            return;
+          }
+
+          console.log("Successfully updated application status to accepted");
         }
+
+        console.log(`Successfully verified worker assignment: Job ${jobId} is assigned to worker ${workerId}`);
       } catch (err) {
         console.error("Error verifying job worker:", err);
         setError("Failed to verify payment information");
@@ -130,8 +421,32 @@ function PaymentPage() {
       return;
     }
 
+    if (paymentMethod === "mpesa") {
+      // Check if customer phone is available
+      if (!formattedCustomerPhone && (!manualCustomerPhone || manualCustomerPhone.length < 9)) {
+        setError("Please enter your valid M-Pesa phone number to receive the payment prompt.");
+        return;
+      }
+
+      // Check if worker phone is available
+      if (!formattedWorkerPhone && (!manualPhone || manualPhone.length < 9)) {
+        setError("Please enter a valid M-Pesa phone number for the worker to receive the payment.");
+        return;
+      }
+    }
+
     try {
       setLoading(true);
+
+      // Check if M-Pesa credentials are configured when using M-Pesa
+      if (paymentMethod === 'mpesa' &&
+          (!import.meta.env.VITE_MPESA_CONSUMER_KEY ||
+           !import.meta.env.VITE_MPESA_CONSUMER_SECRET ||
+           !import.meta.env.VITE_MPESA_PASS_KEY)) {
+        setError('M-Pesa API credentials are not configured. Please contact the administrator.');
+        setLoading(false);
+        return;
+      }
 
       // Get current user
       const {
@@ -143,10 +458,10 @@ function PaymentPage() {
         return;
       }
 
-      // Verify this job belongs to the current user
+      // Verify this job belongs to the current user and has an assigned worker
       const { data: jobData, error: jobVerifyError } = await supabase
         .from("jobs")
-        .select("customer_id, status")
+        .select("customer_id, status, assigned_worker_id")
         .eq("id", jobId)
         .single();
 
@@ -162,21 +477,55 @@ function PaymentPage() {
         throw new Error("This job is not in progress and cannot be paid for");
       }
 
-      // Verify again that this worker is assigned to this job
+      // Explicitly check the assigned_worker_id field in the jobs table
+      if (!jobData.assigned_worker_id) {
+        throw new Error("No worker has been assigned to this job yet");
+      }
+
+      // Verify that the worker ID passed in the URL matches the assigned worker in the database
+      if (jobData.assigned_worker_id !== workerId) {
+        console.error(`Worker ID mismatch: Expected ${jobData.assigned_worker_id}, got ${workerId}`);
+        throw new Error("Invalid payment: The specified worker is not assigned to this job");
+      }
+
+      // Log successful verification
+      console.log(`Successfully verified worker assignment: Job ${jobId} is assigned to worker ${workerId}`);
+
+
+      // Verify again that this worker has an application for this job
       const { data: applicationData, error: applicationError } = await supabase
         .from("job_applications")
         .select("*")
         .eq("job_id", jobId)
         .eq("worker_id", workerId)
-        .eq("status", "accepted")
         .single();
 
       if (applicationError || !applicationData) {
-        throw new Error("Invalid payment: This worker is not assigned to this job");
+        throw new Error("Invalid payment: No application found for this worker");
       }
 
-      // Create payment record
-      const { error: paymentError } = await supabase.from("payments").insert({
+      // If the application exists but isn't accepted, update it to accepted
+      if (applicationData.status !== "accepted") {
+        console.log(`Application found with status: ${applicationData.status}, updating to accepted`);
+
+        const { error: updateError } = await supabase
+          .from("job_applications")
+          .update({
+            status: "accepted",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", applicationData.id);
+
+        if (updateError) {
+          console.error("Failed to update application status:", updateError);
+          throw new Error("Failed to update application status. Please try again.");
+        }
+
+        console.log("Successfully updated application status to accepted");
+      }
+
+      // Create payment record with additional details for M-Pesa
+      const paymentDetails: any = {
         job_id: jobId,
         customer_id: user.id,
         worker_id: workerId,
@@ -184,7 +533,48 @@ function PaymentPage() {
         payment_method: paymentMethod,
         status: "completed",
         payment_date: new Date().toISOString(),
-      });
+      };
+
+      // Process M-Pesa payment
+      if (paymentMethod === "mpesa") {
+        // Use manually entered phone numbers if not available from profiles
+        const customerPhoneToUse = formattedCustomerPhone || manualCustomerPhone;
+        const workerPhoneToUse = formattedWorkerPhone || manualPhone;
+
+        // Don't create a payment record yet - we'll let the M-Pesa API handle it
+        // Process the M-Pesa payment
+        const mpesaResponse = await processJobPayment(
+          jobId || '',
+          workerId || '',
+          user.id,
+          amount || 0,
+          `+254${customerPhoneToUse}`, // Customer phone for payment prompt
+          `+254${workerPhoneToUse}`    // Worker phone for receiving payment
+        );
+
+        if (!mpesaResponse.success) {
+          console.error('M-Pesa payment failed:', mpesaResponse);
+          throw new Error(mpesaResponse.message || "Failed to initiate M-Pesa payment");
+        }
+
+        console.log('M-Pesa payment initiated successfully:', mpesaResponse);
+
+        // Set the checkout ID for polling
+        setMpesaCheckoutId(mpesaResponse.checkoutRequestId);
+
+        // Show a message to the user
+        alert("M-Pesa payment initiated. Please check your phone to complete the payment.");
+
+        // Set success state to show the payment processing screen
+        setSuccess(true);
+        setMpesaStatus("pending");
+
+        // We'll skip the rest of the payment processing as it will be handled by the callback
+        setLoading(false);
+        return;
+      }
+
+      const { error: paymentError } = await supabase.from("payments").insert(paymentDetails);
 
       if (paymentError) throw paymentError;
 
@@ -203,11 +593,32 @@ function PaymentPage() {
       setTimeout(() => {
         navigate("/dashboard");
       }, 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error processing payment:", err);
-      setError(typeof err === "object" && err !== null && "message" in err
-        ? String(err.message)
-        : "Failed to process payment. Please try again.");
+
+      // Provide more detailed error message
+      let errorMessage = "Failed to process payment. Please try again.";
+
+      if (err.message) {
+        errorMessage = `Payment error: ${err.message}`;
+      }
+
+      // Log additional details if available
+      if (err.response) {
+        console.error("Error response:", err.response);
+      }
+
+      if (err.data) {
+        console.error("Error data:", err.data);
+      }
+
+      setError(errorMessage);
+
+      // If this was an M-Pesa payment, set the status to failed
+      if (paymentMethod === "mpesa") {
+        setMpesaStatus("failed");
+        setSuccess(true); // Show the error screen
+      }
     } finally {
       setLoading(false);
     }
@@ -217,9 +628,55 @@ function PaymentPage() {
     return (
       <div className="min-h-screen bg-[#F5F5DC] flex items-center justify-center p-4">
         <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
-          <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
-          <p className="text-gray-600 mb-6">Your payment of KES {amount?.toFixed(2)} has been processed successfully.</p>
+          {paymentMethod === "mpesa" && mpesaStatus === "pending" ? (
+            <>
+              <Loader className="h-16 w-16 text-green-500 mx-auto mb-6 animate-spin" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Processing</h2>
+              <p className="text-gray-600 mb-6">
+                Your M-Pesa payment is being processed. Please check your phone to complete the transaction.
+              </p>
+              {mpesaPolling && (
+                <p className="text-sm text-gray-500 mb-4">Checking payment status...</p>
+              )}
+            </>
+          ) : paymentMethod === "mpesa" && mpesaStatus === "failed" ? (
+            <>
+              <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-6" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Failed</h2>
+              <p className="text-gray-600 mb-6">
+                Your M-Pesa payment could not be processed. Please try again or choose a different payment method.
+              </p>
+            </>
+          ) : (
+            <>
+              <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-6" />
+              <h2 className="text-2xl font-bold text-gray-900 mb-2">Payment Successful!</h2>
+              <p className="text-gray-600 mb-2">Your payment of KES {amount?.toFixed(2)} has been processed successfully.</p>
+              <p className="text-gray-500 mb-6">
+                {paymentMethod === "card" && "Payment was made using Credit Card"}
+                {paymentMethod === "paypal" && "Payment was made using PayPal"}
+                {paymentMethod === "mpesa" && (
+                  <>
+                    Payment was made using M-Pesa<br />
+                    <div className="grid grid-cols-2 gap-2 mt-2 mb-2 text-left">
+                      <div>
+                        <p className="text-sm font-medium">Customer:</p>
+                        <p className="text-sm">Phone: +254{formattedCustomerPhone || manualCustomerPhone}</p>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">Worker:</p>
+                        <p className="text-sm">{workerName}<br />Phone: +254{formattedWorkerPhone || manualPhone}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm mt-2">Transaction ID: {mpesaCheckoutId || "WC-" + Date.now().toString().substring(7)}</p>
+                    <p className="text-sm mt-1 text-green-600">
+                      The payment has been successfully processed and sent to the worker's M-Pesa account.
+                    </p>
+                  </>
+                )}
+              </p>
+            </>
+          )}
           <p className="text-gray-500 mb-6">You will be redirected to your dashboard shortly.</p>
           <button
             onClick={() => navigate("/dashboard")}
@@ -289,23 +746,44 @@ function PaymentPage() {
           {/* Payment Method Selection */}
           <div className="p-6 border-b border-gray-200">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Payment Method</h2>
-            <div className="flex gap-4">
+            <div className="grid grid-cols-3 gap-2">
               <button
+                type="button"
                 onClick={() => setPaymentMethod("card")}
-                className={`flex-1 py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                className={`py-3 px-2 rounded-lg flex items-center justify-center gap-1 ${
                   paymentMethod === "card" ? "bg-[#CC7357] text-white" : "bg-gray-100 text-gray-700"
                 }`}
               >
-                <CreditCard className="h-5 w-5" />
-                Credit Card
+                <CreditCard className="h-4 w-4" />
+                <span className="text-sm">Card</span>
               </button>
               <button
+                type="button"
+                onClick={() => setPaymentMethod("mpesa")}
+                className={`py-3 px-2 rounded-lg flex items-center justify-center gap-1 ${
+                  paymentMethod === "mpesa" ? "bg-[#CC7357] text-white" : "bg-gray-100 text-gray-700"
+                }`}
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path
+                    d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
+                    fill="currentColor"
+                  />
+                  <path
+                    d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"
+                    fill="currentColor"
+                  />
+                </svg>
+                <span className="text-sm">M-Pesa</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setPaymentMethod("paypal")}
-                className={`flex-1 py-3 px-4 rounded-lg flex items-center justify-center gap-2 ${
+                className={`py-3 px-2 rounded-lg flex items-center justify-center gap-1 ${
                   paymentMethod === "paypal" ? "bg-[#CC7357] text-white" : "bg-gray-100 text-gray-700"
                 }`}
               >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                   <path
                     d="M19.5 8.5H4.5C3.4 8.5 2.5 9.4 2.5 10.5V17.5C2.5 18.6 3.4 19.5 4.5 19.5H19.5C20.6 19.5 21.5 18.6 21.5 17.5V10.5C21.5 9.4 20.6 8.5 19.5 8.5Z"
                     stroke="currentColor"
@@ -321,7 +799,7 @@ function PaymentPage() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                PayPal
+                <span className="text-sm">PayPal</span>
               </button>
             </div>
           </div>
@@ -335,7 +813,7 @@ function PaymentPage() {
               </div>
             )}
 
-            {paymentMethod === "card" ? (
+            {paymentMethod === "card" && (
               <>
                 <div>
                   <label htmlFor="cardNumber" className="block text-sm font-medium text-gray-700 mb-1">
@@ -411,7 +889,108 @@ function PaymentPage() {
                   </div>
                 </div>
               </>
-            ) : (
+            )}
+
+            {paymentMethod === "mpesa" && (
+              <div className="space-y-4">
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <h3 className="text-green-800 font-medium mb-2">M-Pesa Payment</h3>
+                  <p className="text-green-700 text-sm mb-4">
+                    You will receive a prompt on your phone to complete the payment. The funds will be sent to the worker's M-Pesa account.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-4 mb-2">
+                    <div>
+                      <p className="text-green-700 text-sm font-medium">Customer (You):</p>
+                      <p className="text-green-700 text-sm">
+                        Phone: <span className="font-bold">+254{formattedCustomerPhone}</span>
+                        {!formattedCustomerPhone && <span className="text-red-500 block">(No valid phone number found)</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-green-700 text-sm font-medium">Worker:</p>
+                      <p className="text-green-700 text-sm">
+                        {workerName}<br />
+                        Phone: <span className="font-bold">+254{formattedWorkerPhone}</span>
+                        {!formattedWorkerPhone && <span className="text-red-500 block">(No valid phone number found)</span>}
+                      </p>
+                    </div>
+                  </div>
+
+                  <p className="text-green-700 text-sm font-medium mt-3">
+                    Amount: <span className="font-bold">KES {amount?.toFixed(2)}</span>
+                  </p>
+                </div>
+
+                {!formattedCustomerPhone && (
+                  <div className="space-y-4">
+                    <div className="bg-yellow-50 p-4 rounded-lg text-yellow-800">
+                      <p className="font-medium">Your phone number not available</p>
+                      <p className="text-sm mt-1">Please enter your M-Pesa phone number to receive the payment prompt.</p>
+                    </div>
+
+                    <div>
+                      <label htmlFor="manualCustomerPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                        Your M-Pesa Phone Number
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">+254</span>
+                        <input
+                          type="text"
+                          id="manualCustomerPhone"
+                          name="manualCustomerPhone"
+                          value={manualCustomerPhone}
+                          onChange={(e) => {
+                            // Only allow numbers and limit to 9 digits (without the country code)
+                            const value = e.target.value.replace(/\D/g, "");
+                            setManualCustomerPhone(value.substring(0, 9));
+                          }}
+                          placeholder="7XXXXXXXX"
+                          className="pl-16 pr-4 py-2 border border-gray-300 rounded-md w-full focus:ring-green-500 focus:border-green-500"
+                          maxLength={9}
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Enter your phone number without the country code (e.g., 7XXXXXXXX)</p>
+                    </div>
+                  </div>
+                )}
+
+                {!formattedWorkerPhone && (
+                  <div className="space-y-4">
+                    <div className="bg-yellow-50 p-4 rounded-lg text-yellow-800">
+                      <p className="font-medium">Worker's phone number not available</p>
+                      <p className="text-sm mt-1">The worker has not provided a valid M-Pesa phone number in their profile. Please enter their M-Pesa phone number below.</p>
+                    </div>
+
+                    <div>
+                      <label htmlFor="manualPhone" className="block text-sm font-medium text-gray-700 mb-1">
+                        Worker's M-Pesa Phone Number
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">+254</span>
+                        <input
+                          type="text"
+                          id="manualPhone"
+                          name="manualPhone"
+                          value={manualPhone}
+                          onChange={(e) => {
+                            // Only allow numbers and limit to 9 digits (without the country code)
+                            const value = e.target.value.replace(/\D/g, "");
+                            setManualPhone(value.substring(0, 9));
+                          }}
+                          placeholder="7XXXXXXXX"
+                          className="pl-16 pr-4 py-2 border border-gray-300 rounded-md w-full focus:ring-green-500 focus:border-green-500"
+                          maxLength={9}
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Enter the worker's phone number without the country code (e.g., 7XXXXXXXX)</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {paymentMethod === "paypal" && (
               <div className="text-center py-6">
                 <p className="text-gray-600 mb-4">You will be redirected to PayPal to complete your payment.</p>
                 <svg
@@ -469,7 +1048,9 @@ function PaymentPage() {
                 ) : (
                   <>
                     <Lock className="h-5 w-5" />
-                    <span>Pay KES {amount?.toFixed(2)}</span>
+                    {paymentMethod === "card" && <span>Pay KES {amount?.toFixed(2)} with Card</span>}
+                    {paymentMethod === "mpesa" && <span>Pay KES {amount?.toFixed(2)} with M-Pesa</span>}
+                    {paymentMethod === "paypal" && <span>Pay KES {amount?.toFixed(2)} with PayPal</span>}
                   </>
                 )}
               </button>
